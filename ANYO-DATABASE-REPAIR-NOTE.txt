@@ -1,0 +1,12 @@
+RADIUM V38 - ANYO CATEGORY / DRAW LOTS PACKAGE
+
+Live Supabase tournament repaired before this package was created:
+- Tournament: CAPRISAA ARNIS TOURNAMENT
+- Tournament ID: be87fe1a-c86a-4c71-84b9-9bc65fe2fd64
+- Anyo entries checked: 196
+- Previously incorrect Elementary/Secondary assignments: 76
+- After repair: 196 correct, 0 incorrect
+
+No players, Anyo entry member rows, or entry numbers were deleted or re-imported.
+
+Frontend package includes the V37 ANYO category selector, separate Elementary/Secondary Draw Lots selectors, per-category ANYO SCOREBOARD button, corrected performer counter, REFRESH label, and direct Supabase draw persistence/verification.

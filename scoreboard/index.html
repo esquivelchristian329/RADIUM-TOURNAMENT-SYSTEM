@@ -1,0 +1,1224 @@
+<!DOCTYPE html>  <html lang="en">  
+<head><script src="../db/supabase-config.js"></script><script src="../js/supabase-db.js"></script>  
+<meta charset="UTF-8">  
+<meta name="viewport" content="width=device-width, initial-scale=1.0">  
+<title>RADIUM Scoreboard</title>    
+
+  <link rel="stylesheet" href="scoreboard.css">
+
+<style id="RADIUM_LOCAL_STYLE_FALLBACK">
+  
+@font-face {  
+  font-family: 'MyCustomFont';  
+  src: url('../MyCustomFont/ninja-naruto/njnaruto.ttf') format('truetype');  
+  font-weight: normal;  
+  font-style: normal;  
+}  
+*{  
+    margin:0;  
+    padding:0;  
+    box-sizing:border-box;  
+    font-family:Arial, Helvetica, sans-serif, MyCustomFont;  
+}  
+      
+  
+  
+body{  
+    background:#000;  
+    color:white;  
+    overflow:auto;  
+    font-family: 'MyCustomFont', sans-serif;  
+}  
+  
+.scoreboard{  
+    width:100vw;  
+    min-height:100vh;
+    height:auto;  
+    display:flex;  
+    flex-direction:column;  
+    padding:10px;  
+    gap:10px;  
+}  
+  
+.title{  
+    text-align:center;  
+    font-size:3vw;  
+    font-weight:bold;  
+    letter-spacing:5px;  
+}  
+  
+.top{  
+    flex:1;  
+    display:grid;  
+    grid-template-columns:1fr 22% 1fr;  
+    gap:10px;  
+}  
+  
+.panel{  
+    border:4px solid;  
+    border-radius:20px;  
+    padding:10px;  
+    display:flex;  
+    flex-direction:column;  
+    justify-content:space-between;  
+}  
+  
+.blue{  
+    border-color:#0066ff;  
+    background:#0066ff;  
+}  
+  
+.red{  
+    border-color:#ff1a1a;  
+    background:#ff1a1a;  
+}  
+  
+.panel h2{  
+    text-align:center;  
+    font-size:3vw;  
+}  
+  
+.blue h2{  
+    color:white;  
+}  
+  
+.red h2{  
+    color:white;  
+}  
+  
+.score-section{  
+    text-align:center;  
+}  
+  
+.label{  
+    font-size:clamp(14px,1.2vw,20px);  
+}  
+  
+.score{  
+    font-size:clamp(72px,8vw,132px);  
+    font-weight:bold;  
+}  
+  
+.blue .score{  
+    color:white;  
+}  
+  
+.red .score{  
+    color:white;  
+}  
+  
+.controls{  
+    display:grid; 
+    grid-template-columns: 1fr 1fr;  
+    justify-content:center;  
+    gap:10px;  
+    margin-top:10px;  
+}
+.controls button{
+  display:flex;
+  justify-content:center;
+  gap:10px;
+  margin-top:5px  
+}  
+  
+button{  
+    border:none;  
+    padding:10px 15px;  
+    border-radius:10px;  
+    font-weight:bold;  
+    cursor:pointer;  
+    font-size:clamp(11px,0.9vw,15px);  
+}  
+  
+.add{  
+    background:limegreen;  
+    color:white;  
+}  
+  
+.minus{  
+    background:crimson;  
+    color:white;  
+}  
+  
+.reset{  
+    background:orange;  
+    color:black;  
+}
+  
+.fullscreen-btn{
+    background:gold;
+    color:black;
+}  
+  
+.check{  
+    width:35px;  
+    height:35px;  
+    cursor:pointer;  
+    accent-color:limegreen;  
+    margin-top:10px;  
+}  
+  
+.penalties{  
+    display:grid;  
+    grid-template-columns:repeat(6,1fr);  
+    gap:5px;  
+}  
+  
+.penalty{  
+    border:2px solid #444;  
+    border-radius:10px;  
+    padding:5px;  
+    text-align:center;  
+}  
+  
+.penalty-title{  
+    font-size:clamp(10px,0.75vw,13px);  
+}  
+  
+.center{  
+    border:4px solid white;  
+    border-radius:20px;  
+    padding:10px;  
+    display:flex;  
+    flex-direction:column;  
+    justify-content:space-around;  
+    align-items:center;  
+}  
+  
+.timer-label,  
+.round-label{  
+    font-size:clamp(18px,1.6vw,26px);  
+}  
+  
+.timer{  
+    font-size:clamp(52px,5.2vw,82px);  
+    color:gold;  
+    font-weight:bold;  
+}  
+  
+.round{  
+    font-size:clamp(44px,4.4vw,70px);  
+    font-weight:bold;  
+}  
+  
+.bottom{  
+    height:28%;  
+    display:grid;  
+    grid-template-columns:repeat(3,1fr);  
+    gap:10px;  
+}  
+  
+.round-card{  
+    border:3px solid #666;  
+    border-radius:15px;  
+    padding:10px;  
+    text-align:center;  
+    display:flex;  
+    flex-direction:column;  
+    justify-content:space-between;  
+}  
+  
+.round-card h3{  
+    font-size:clamp(18px,1.6vw,26px);  
+}  
+  
+.winner-display{  
+    font-size:clamp(20px,2vw,30px);  
+    font-weight:bold;  
+}  
+  
+.round-score{  
+    font-size:clamp(18px,1.6vw,26px);  
+    font-weight:bold;  
+    color:white;  
+}  
+  
+.blue-win{  
+    color:gold;  
+}  
+  
+.red-win{  
+    color:gold;  
+}  
+  
+.draw{  
+    color:gold;  
+}  
+  
+.winner-buttons{  
+    display:flex;  
+    justify-content:center;  
+    gap:10px;  
+}  
+  
+.editable{  
+    background:transparent;  
+    border:none;  
+    color:white;  
+    text-align:center;  
+    width:100%;  
+    outline:none;  
+}  
+  
+.score-input{  
+    font-size:clamp(72px,8vw,132px);  
+    font-weight:bold;  
+}  
+  
+.timer-input{  
+    font-size:clamp(52px,5.2vw,82px);  
+    font-weight:bold;  
+    color:gold;  
+}  
+  
+.round-input{  
+    font-size:clamp(44px,4.4vw,70px);  
+    font-weight:bold;  
+}  
+  
+.champion-text{  
+    text-align:center;  
+    font-size:clamp(18px,1.6vw,26px);  
+    font-weight:bold;  
+    color:gold;  
+    margin-top:10px;  
+    letter-spacing:2px;  
+}  
+.title-container{  
+    display:flex;  
+    align-items:center;  
+    justify-content:center;  
+    gap:15px;  
+    width:100%;  
+}  
+  
+.top-logo{  
+    width:100px;  
+    height:100px;  
+    object-fit:contain;  
+}  
+  
+.title{  
+    text-align:center;  
+    font-size:clamp(20px,2vw,30px);  
+    font-weight:bold;  
+    letter-spacing:5px;  
+    flex:1;  
+} 
+/* Laptop-first sizing: optimized for 1280x720, 1366x768 and 1440x900 */
+@media (min-width: 901px) and (max-width: 1600px){
+  .scoreboard{padding:8px;gap:8px}
+  .title{font-size:clamp(22px,2.3vw,34px);letter-spacing:3px}
+  .panel{border-width:3px;border-radius:14px;padding:8px}
+  .score-section{font-size:16px}
+  .score{font-size:clamp(68px,7.5vw,118px)!important}
+  .timer-label{font-size:18px}
+  .timer{font-size:clamp(50px,5vw,78px)!important}
+  .timer #timerMs{font-size:.36em}
+  .controls button,.action-btn{font-size:14px;min-height:36px}
+  .round-score{font-size:20px}
+  .match-info{font-size:13px}
+}
+
+@media(max-width:900px){
+
+    .top{
+        grid-template-columns:1fr;
+    }
+
+    .bottom{
+        grid-template-columns:1fr;
+        height:auto;
+    }
+
+    .title{
+        font-size:4vw;
+    }
+
+    button{
+        font-size:3vw;
+    }
+
+    .score{
+        font-size:20vw;
+    }
+
+    .timer{
+        font-size:clamp(42px,8vw,76px);
+    }
+}
+  
+  
+
+
+
+/* Tournament timer: large main clock + compact milliseconds for LED/monitor readability */
+.timer-wrap{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;flex:1}
+.timer{font-variant-numeric:tabular-nums;letter-spacing:0;white-space:nowrap;line-height:1;font-weight:900;display:flex;align-items:baseline;justify-content:center}
+.timer #timerMs{font-size:.42em;opacity:.9;margin-left:.06em;vertical-align:baseline}
+.timer-edit{position:absolute;inset:auto 8%;width:84%;height:42px;opacity:0;pointer-events:none;border:1px solid #777;background:#111;color:#fff;text-align:center;font-size:22px;font-weight:900;border-radius:6px}
+.timer-wrap.editing .timer-edit{opacity:1;pointer-events:auto;z-index:3}
+.timer-wrap.editing .timer{opacity:.12}
+@media(max-width:800px){.timer{font-size:clamp(32px,7vw,58px)!important}.timer #timerMs{font-size:.38em}.timer-edit{height:34px;font-size:16px}}
+
+.dq-btn,.noshow-btn{width:100%;padding:7px 4px;border-radius:8px;font-weight:900;font-size:clamp(9px,.7vw,12px);cursor:pointer}.dq-btn{background:#ffb000;color:#111}.noshow-btn{background:#333;color:#fff;border:1px solid #777}.penalty:has(button){display:flex;align-items:center;justify-content:center}.penalty:has(button) .dq-btn,.penalty:has(button) .noshow-btn{min-height:35px}
+
+.title-container{display:flex;align-items:center;justify-content:center;gap:10px;width:100%}.scoreboard-logo{width:58px;height:58px;object-fit:contain;flex:0 0 auto;display:none}.title-container .title{flex:1;min-width:0;max-width:70%}@media(max-width:900px){.scoreboard-logo{width:42px;height:42px}.title-container{gap:6px}}
+</style>
+</head>  <body>  <div class="scoreboard">  <div class="title-container" id="scoreboardHeader"><img class="top-logo scoreboard-logo" id="logo1" alt=""><img class="top-logo scoreboard-logo" id="logo2" alt=""><div id="tournamentTitle" class="title" style="font-size:clamp(16px,1.7vw,28px);letter-spacing:2px;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">RADIUM TOURNAMENT</div><img class="top-logo scoreboard-logo" id="logo3" alt=""><img class="top-logo scoreboard-logo" id="logo4" alt=""></div><div class="top">  
+
+    <!-- BLUE -->  
+    <div class="panel blue">  
+
+        <h2 id="blueName">BLUE</h2>  
+
+        <div class="score-section">  
+
+            <div class="label">SCORE</div>  
+
+            <input type="number"  
+                   id="blueScore"  
+                   class="editable score-input score"  
+                   value="0">  
+
+            <div class="controls">  
+                <button class="add" onclick="adjust('blueScore',1)">+</button>  
+                <button class="minus" onclick="adjust('blueScore',-1)">-</button>  
+            </div>  
+
+            <div id="blueChampion" class="champion-text"></div>  
+
+        </div>  
+
+        <div class="penalties">  
+
+            <div class="penalty">  
+                <div class="penalty-title">ADV</div>  
+                <input type="checkbox" id="blueAdv" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">FOUL 1</div>  
+                <input type="checkbox" id="bf1" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">FOUL 2</div>  
+                <input type="checkbox" id="bf2" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">FOUL 3</div>  
+                <input type="checkbox" id="bf3" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">DISARM 1</div>  
+                <input type="checkbox" id="bd1" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">DISARM 2</div>  
+                <input type="checkbox" id="bd2" class="check">  
+            </div>  
+            <div class="penalty"><button type="button" class="dq-btn" onclick="officialDecision('BLUE','DQ')">DQ</button></div>
+            <div class="penalty"><button type="button" class="noshow-btn" onclick="officialDecision('BLUE','NO_SHOW')">NO SHOW</button></div>
+
+        </div>  
+
+    </div>  
+
+    <!-- CENTER -->  
+    <div class="center">  
+
+        <div class="timer-label">TIME</div>  
+
+        <div id="timerWrap" class="timer-wrap" title="Click the timer to edit the time">
+            <div id="timerDisplay" class="timer" role="timer" aria-label="Match time">
+                <span id="timerMain">01:00</span><span id="timerMs">.000</span>
+            </div>
+            <input type="text" id="timer" class="timer-input timer-edit" value="01:00.000"
+                   onchange="manualTimeEdit()" aria-label="Edit match time">
+        </div>  
+
+        <div class="controls">  
+
+                <button class="reset" onclick="resetTimer()">RESET</button>
+
+                <button class="fullscreen-btn" onclick="toggleFullscreen()">
+                    FULLSCREEN
+                </button>
+                <button id="advanceMatchBtn" class="add" onclick="nextMatchInBracket()">
+                    NEXT MATCH
+                </button>
+
+                <button class="fullscreen-btn" onclick="returnToTournament()">
+                    RETURN TO BRACKET
+                </button>
+          
+        </div>  
+
+        <div class="round-label">MATCH FORMAT</div>
+
+        <select id="matchFormat" class="editable round-input" aria-label="Match format">
+            <option value="1">1 ROUND — SINGLE ROUND MATCH</option>
+            <option value="3">BEST OF 3 ROUNDS</option>
+        </select>
+
+        <div class="round-label">ROUND</div>  
+
+        <input type="number"  
+               id="round"  
+               class="editable round-input round"  
+               value="1"  
+               min="1"  
+               max="3">
+
+        <div class="winner-buttons">
+            <button class="blue" onclick="awardWinner('BLUE')">AWARD BLUE</button>
+            <button class="red" onclick="awardWinner('RED')">AWARD RED</button>
+            <button id="editCompletedBtn" class="add" style="display:none" onclick="editCompletedResult()">EDIT RESULT</button>
+        </div>  
+
+
+    </div>  
+
+    <!-- RED -->  
+    <div class="panel red">  
+
+        <h2 id="redName">RED</h2>  
+
+        <div class="score-section">  
+
+            <div class="label">SCORE</div>  
+
+            <input type="number"  
+                   id="redScore"  
+                   class="editable score-input score"  
+                   value="0">  
+
+            <div class="controls">  
+                <button class="add" onclick="adjust('redScore',1)">+</button>  
+                <button class="minus" onclick="adjust('redScore',-1)">-</button>  
+            </div>  
+
+            <div id="redChampion" class="champion-text"></div>  
+
+        </div>  
+
+        <div class="penalties">  
+
+            <div class="penalty">  
+                <div class="penalty-title">ADV</div>  
+                <input type="checkbox" id="redAdv" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">FOUL 1</div>  
+                <input type="checkbox" id="rf1" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">FOUL 2</div>  
+                <input type="checkbox" id="rf2" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">FOUL 3</div>  
+                <input type="checkbox" id="rf3" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">DISARM 1</div>  
+                <input type="checkbox" id="rd1" class="check">  
+            </div>  
+
+            <div class="penalty">  
+                <div class="penalty-title">DISARM 2</div>  
+                <input type="checkbox" id="rd2" class="check">  
+            </div>  
+            <div class="penalty"><button type="button" class="dq-btn" onclick="officialDecision('RED','DQ')">DQ</button></div>
+            <div class="penalty"><button type="button" class="noshow-btn" onclick="officialDecision('RED','NO_SHOW')">NO SHOW</button></div>
+
+        </div>  
+
+    </div>  
+
+</div>  
+
+<!-- ROUND RESULTS -->  
+
+<div class="bottom">  
+
+    <div class="round-card">  
+        <h3 id="title2">R1 WINNER</h3>  
+
+        <div class="winner-display" id="winner1">---</div>  
+
+        <div class="round-score" id="score1">0 - 0</div>
+
+<div class="round-score" id="stats1">  
+    F:0-0 | D:0-0  
+</div>  </div>  
+
+    <div class="round-card">  
+        <h3 id="title3">R2 WINNER</h3>  
+
+        <div class="winner-display" id="winner2">---</div>  
+
+        <div class="round-score" id="score2">0 - 0</div>
+
+<div class="round-score" id="stats2">  
+    F:0-0 | D:0-0  
+</div>  </div>  
+
+    <div class="round-card">  
+        <h3 id="title1">R3 WINNER</h3>  
+
+        <div class="winner-display" id="winner3">---</div>  
+
+        <div class="round-score" id="score3">0 - 0</div>
+
+<div class="round-score" id="stats3">  
+    F:0-0 | D:0-0  
+</div>  </div>  
+
+</div>
+
+</div>  <script>  
+  
+let timerInterval;  
+let roundDurationSeconds = 60;
+let remainingMs = roundDurationSeconds * 1000;  
+let isRunning = false;  
+  
+/* ADJUST VALUES */  
+  
+function adjust(id, amount){  
+  
+    let input = document.getElementById(id);  
+  
+    let value = parseInt(input.value) || 0;  
+  
+    value += amount;  
+  
+    if(value < 0) value = 0;  
+  
+    if(id === "round"){  
+  
+        if(value > 3) value = 3;  
+    }  
+  
+    input.value = value;  
+      
+     /* AUTO ADV CHECK */
+
+    if(id === "blueScore" || id === "redScore"){
+
+        autoAdvantage();
+    }
+}  
+  
+/* AUTO ADVANTAGE CHECK */
+
+function autoAdvantage(){
+
+    let blueScore =
+        parseInt(document.getElementById("blueScore").value) || 0;
+
+    let redScore =
+        parseInt(document.getElementById("redScore").value) || 0;
+
+    let blueAdv =
+        document.getElementById("blueAdv");
+
+    let redAdv =
+        document.getElementById("redAdv");
+
+    /* RESET IF BOTH ARE ZERO */
+
+    if(blueScore === 0 && redScore === 0){
+
+        blueAdv.checked = false;
+        redAdv.checked = false;
+
+        return;
+    }
+
+    /* FIRST POINT GETS ADV ONLY ONCE */
+
+    if(
+        blueScore > 0 &&
+        redScore === 0 &&
+        !blueAdv.checked &&
+        !redAdv.checked
+    ){
+
+        blueAdv.checked = true;
+    }
+
+    else if(
+        redScore > 0 &&
+        blueScore === 0 &&
+        !blueAdv.checked &&
+        !redAdv.checked
+    ){
+
+        redAdv.checked = true;
+    }
+}
+  
+/* MATCH CONTEXT + RESULT BRIDGE */
+const scoreQuery=new URLSearchParams(location.search);
+const scoreCourt=scoreQuery.get('court')||'1';
+let currentMatch=null;
+let resultSent=false;
+let resultSaving=false;
+let completedResultEdit=false;
+function activeTid(){return scoreQuery.get('tournament')||''}
+async function loadTournamentBranding(){
+  const tid=activeTid(); if(!tid||!window.RADIUM_DB)return;
+  try{
+    await window.RADIUM_DB.init();
+    const tr=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:tid},limit:1});
+    const row=tr.data?.[0]||{};
+    const title=row.name||'RADIUM TOURNAMENT';
+    const te=document.getElementById('tournamentTitle'); if(te)te.textContent=title;
+    const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];
+    try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:tid},limit:20});(lr.data||[]).forEach(x=>{const u=window.RADIUM_DB.state?.client?.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){}
+    for(let i=0;i<4;i++){const el=document.getElementById('logo'+(i+1));if(el){const src=logos[i]||'';el.src=src;el.style.display=src?'block':'none';}}
+  }catch(e){console.warn('Tournament branding load:',e)}
+}
+
+let cloudMatchId=scoreQuery.get('matchId')||'';
+async function loadCurrentMatch(){
+  const urlMatch=(scoreQuery.get('categoryId')&&scoreQuery.get('round')!==null&&scoreQuery.get('match')!==null)?{
+    categoryId:scoreQuery.get('categoryId'),categoryName:scoreQuery.get('categoryName')||'',event:scoreQuery.get('event')||'',
+    round:Number(scoreQuery.get('round'))||1,match:Number(scoreQuery.get('match'))||1,red:scoreQuery.get('red'),blue:scoreQuery.get('blue'),
+    redName:scoreQuery.get('redName')||scoreQuery.get('red')||'RED',blueName:scoreQuery.get('blueName')||scoreQuery.get('blue')||'BLUE',court:Number(scoreQuery.get('court')||1),matchFormat:scoreQuery.get('matchFormat')||'single',tournament:activeTid(),matchId:cloudMatchId
+  }:null;
+  currentMatch=urlMatch;
+  if(currentMatch){
+    if(cloudMatchId&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const r=await window.RADIUM_DB.select('matches',{select:'id,tournament_id,category_id,round,match_number,blue_player_id,red_player_id,status,court_id,match_format,metadata,started_at',eq:{id:cloudMatchId},limit:1});if(r.error)throw r.error;if(!r.data?.[0])throw new Error('This match is no longer available.');if(String(r.data[0].tournament_id)!==String(activeTid()))throw new Error('The match belongs to a different tournament.');currentMatch.courtId=r.data[0].court_id;currentMatch.matchFormat=r.data[0].match_format||currentMatch.matchFormat;currentMatch.metadata=r.data[0].metadata||{};currentMatch.startedAt=r.data[0].started_at||null;currentMatch.status=r.data[0].status||null;currentMatch.nextMatchId=r.data[0].metadata?.nextMatchId||null;currentMatch.nextSlot=r.data[0].metadata?.nextSlot||null;if(window.RADIUM_AUTH?.isOfficial?.()){const sess=await window.RADIUM_DB.session();const uid=sess.data?.session?.user?.id;if(uid){const ar=await window.RADIUM_DB.select('staff_court_assignments',{select:'court_id,active',eq:{tournament_id:activeTid(),user_id:uid,active:true}});if(ar.error)throw ar.error;const ok=(ar.data||[]).some(x=>String(x.court_id)===String(r.data[0].court_id));if(!ok)throw new Error('This scoreboard is not assigned to your court.');}}}catch(e){console.error('Cloud match validation:',e);alert('This scoreboard is not connected to a valid tournament match. '+(e.message||e));currentMatch=null;return null}}
+    const blue=currentMatch.blueName||currentMatch.blue||'BLUE',red=currentMatch.redName||currentMatch.red||'RED';
+    document.getElementById('blueName').textContent=blue;document.getElementById('redName').textContent=red;
+    const info=document.getElementById('matchInfo');if(info)info.textContent=(currentMatch.categoryName||'MATCH')+' • COURT '+(currentMatch.court||scoreCourt);
+    const round=document.getElementById('round');if(round)round.value=Math.max(1,Math.min(3,Number(currentMatch.round)||1));
+    const fmt=document.getElementById('matchFormat');if(fmt)fmt.value=currentMatch.matchFormat==='best3'?'3':'1';
+  }
+  if(activeTid()&&window.RADIUM_DB){try{const tr=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:activeTid()},limit:1});const row=tr.data?.[0]||{};const configured=Number(row.settings?.setup?.duration);roundDurationSeconds=Number.isFinite(configured)&&configured>=30?configured:60;remainingMs=roundDurationSeconds*1000;updateTimer();const timerInput=document.getElementById('timer');if(timerInput)timerInput.value=formatTime(roundDurationSeconds*1000);const title=row.name||'RADIUM TOURNAMENT';const te=document.getElementById('tournamentTitle');if(te)te.textContent=title;const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];let permanent=[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:activeTid()},limit:20});permanent=lr.data||[];if(window.RADIUM_DB.state?.client)permanent.forEach(x=>{const u=window.RADIUM_DB.state.client.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const el=document.getElementById('logo'+(i+1));if(el){const src=logos[i]||'';el.src=src;el.style.display=src?'block':'none';el.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
+  return currentMatch;
+}
+async function saveCombatResultCloud(payload){
+  if(!window.RADIUM_DB)throw new Error('Tournament service is unavailable.');
+  await window.RADIUM_DB.init();
+  if(!cloudMatchId)throw new Error('Tournament match information is missing.');
+  const current=currentMatch||await loadCurrentMatch();
+  if(!current)throw new Error('The current tournament match could not be loaded.');
+  const metadata={...(current.metadata||{}),roundScores:payload.roundScores||[],scoreboardResultId:payload.id||null,matchFormat:payload.matchFormat||current.matchFormat||'single',nextMatchId:current.nextMatchId||null,nextSlot:current.nextSlot||null};
+  const rpc=await window.RADIUM_DB.rpc('radium_save_match',{tid:activeTid(),incoming:{id:cloudMatchId,category_id:payload.categoryId,court_id:current.courtId||null,round:payload.round,match_number:payload.match,blue_player_id:payload.blue,red_player_id:payload.red,blue_score:Number(payload.blueScore)||0,red_score:Number(payload.redScore)||0,winner_player_id:payload.winner,status:'COMPLETED',completed_at:payload.completedAt||new Date().toISOString(),match_format:payload.matchFormat||current.matchFormat||'single',metadata,nextMatchId:current.nextMatchId||null,nextSlot:current.nextSlot||null,decision_status:payload.decisionStatus||null,loser_player_id:payload.loser||null,correction:!!payload.correction}});
+  if(rpc.error)throw rpc.error;
+  const saved=Array.isArray(rpc.data)?rpc.data[0]:rpc.data;
+  if(saved?.id)payload.id=saved.id;
+  return saved;
+}
+
+function collectRoundState(){
+  const blueScore=Number(document.getElementById('blueScore').value)||0,redScore=Number(document.getElementById('redScore').value)||0;
+  const bf=[1,2,3].filter(i=>document.getElementById('bf'+i)?.checked).length;
+  const rf=[1,2,3].filter(i=>document.getElementById('rf'+i)?.checked).length;
+  const bd=[1,2].filter(i=>document.getElementById('bd'+i)?.checked).length;
+  const rd=[1,2].filter(i=>document.getElementById('rd'+i)?.checked).length;
+  return {blueScore,redScore,blueFouls:bf,redFouls:rf,blueDisarms:bd,redDisarms:rd};
+}
+function saveRoundDisplay(round,winner){
+  const s=collectRoundState();
+  const score=document.getElementById('score'+round);
+  const stats=document.getElementById('stats'+round);
+  if(score)score.textContent=`${s.blueScore} - ${s.redScore}`;
+  if(stats)stats.textContent=`F:${s.blueFouls}-${s.redFouls} | D:${s.blueDisarms}-${s.redDisarms}`;
+  return s;
+}
+function resetRoundControls(){
+  clearInterval(timerInterval); isRunning=false; remainingMs=roundDurationSeconds*1000; updateTimer();
+  document.getElementById('blueScore').value=0; document.getElementById('redScore').value=0;
+  ['blueAdv','redAdv','bf1','bf2','bf3','rf1','rf2','rf3','bd1','bd2','rd1','rd2'].forEach(id=>{const e=document.getElementById(id);if(e)e.checked=false});
+}
+function setAdvanceButton(finished){
+  const b=document.getElementById('advanceMatchBtn');
+  if(!b)return;
+  b.textContent=finished?'NEXT MATCH':'NEXT ROUND';
+  b.onclick=finished?nextMatchInBracket:nextRound;
+  b.classList.toggle('primary',!!finished);
+}
+async function nextMatchInBracket(){
+  if(!resultSent){alert('Finish and award the current match first.');return}
+  // Give the main tournament window a chance to process the result and finish
+  // the Supabase write before this scoreboard navigates to the next match.
+  try{
+    if(window.opener && !window.opener.closed){
+      // The result bridge is asynchronous. Explicitly wait for the main
+      // tournament window to consume the result BEFORE flushing Supabase.
+      if(typeof window.opener.processResult==='function') await window.opener.processResult();
+      if(window.opener.RADIUM_CLOUD?.flush) await window.opener.RADIUM_CLOUD.flush();
+    }
+  }catch(e){console.warn('Result processing/cloud flush before next match:',e)}
+  // autostart=1 tells the main app to load the next ready bracket match
+  // straight into the scoreboard, preferring this same court, instead of
+  // stopping on the Match Queue page and waiting for another click.
+  location.href='../index.html?view=queue&autostart=1&court='+encodeURIComponent(scoreCourt);
+}
+function sendMatchResult(winner){
+  if(resultSent||resultSaving)return;
+  resultSaving=true;
+  const m=currentMatch||loadCurrentMatch();
+  if(!m||!m.categoryId||m.round==null||m.match==null){resultSaving=false;alert('No tournament match is connected to this scoreboard. Return to the bracket and start the match again.');return}
+  const round=Number(m.round),match=Number(m.match);
+  if(!['BLUE','RED'].includes(winner)||!Number.isInteger(round)||round<1||round>3||!Number.isInteger(match)||match<1||!m.categoryId){resultSaving=false;return alert('Invalid match result. Please reload the scoreboard.');}
+  const state=saveRoundDisplay(round,winner);
+  const prior=Array.isArray(window.__RADIUM_ROUND_SCORES)?window.__RADIUM_ROUND_SCORES.slice():[];
+  prior[round-1]={round,blueScore:state.blueScore,redScore:state.redScore,winnerSide:winner,blueFouls:state.blueFouls,redFouls:state.redFouls,blueDisarms:state.blueDisarms,redDisarms:state.redDisarms};
+  window.__RADIUM_ROUND_SCORES=prior;
+  const {blueScore,redScore,blueFouls:bf,redFouls:rf,blueDisarms:bd,redDisarms:rd}=state;
+  const payload={time:new Date().toISOString(),completedAt:new Date().toISOString(),court:Number(scoreCourt)||1,categoryId:m.categoryId,categoryName:m.categoryName||'',event:m.event||'',round,match,blue:m.blue,red:m.red,blueName:m.blueName||m.blue,redName:m.redName||m.red,blueScore,redScore,winner:winner==='BLUE'?m.blue:m.red,winnerSide:winner,blueFouls:bf,redFouls:rf,blueDisarms:bd,redDisarms:rd,roundScores:window.__RADIUM_ROUND_SCORES,official:'Scoreboard',matchFormat:(document.getElementById('matchFormat')?.value==='3'?'best3':'single'),correction:!!completedResultEdit};
+  saveCombatResultCloud(payload).then(()=>{resultSaving=false;try{if(window.opener&&!window.opener.closed)window.opener.postMessage({type:'RADIUM_MATCH_RESULT',payload},'*')}catch(e){} resultSent=true;document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=true);const eb=document.getElementById('editCompletedBtn');if(eb)eb.style.display='inline-block';toast('Result saved and sent to the tournament bracket.');}).catch(e=>{resultSaving=false;console.error('Combat result save failed:',e);document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=false);alert('Result was NOT saved. Please check the connection and try again. '+(e.message||e));});
+  document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=true);
+}
+async function officialDecision(side,status){
+  if(resultSent||resultSaving)return;
+  const m=currentMatch||await loadCurrentMatch();if(!m||!m.categoryId||!cloudMatchId)return alert('No tournament match is connected to this scoreboard.');
+  const name=side==='BLUE'?(m.blueName||m.blue):(m.redName||m.red);
+  if(!confirm(`Confirm ${status} for ${name}?\n\nThe opponent will automatically win and advance.`))return;
+  resultSaving=true;document.querySelectorAll('.winner-buttons button,.dq-btn,.noshow-btn').forEach(b=>b.disabled=true);
+  const winnerSide=side==='BLUE'?'RED':'BLUE',winner=winnerSide==='BLUE'?m.blue:m.red,loser=side==='BLUE'?m.blue:m.red;
+  const payload={time:new Date().toISOString(),completedAt:new Date().toISOString(),court:Number(scoreCourt)||1,categoryId:m.categoryId,categoryName:m.categoryName||'',event:m.event||'',round:Number(m.round)||1,match:Number(m.match)||1,blue:m.blue,red:m.red,blueName:m.blueName||m.blue,redName:m.redName||m.red,blueScore:Number(document.getElementById('blueScore').value)||0,redScore:Number(document.getElementById('redScore').value)||0,winner,winnerSide,blueFouls:0,redFouls:0,blueDisarms:0,redDisarms:0,roundScores:[],official:'Scoreboard',matchFormat:'single',decisionStatus:status,loser};
+  try{await saveCombatResultCloud(payload);resultSent=true;try{if(window.opener&&!window.opener.closed)window.opener.postMessage({type:'RADIUM_MATCH_RESULT',payload},'*')}catch(e){}toast(`${status} recorded. ${winnerSide} wins and advances.`);}catch(e){resultSaving=false;document.querySelectorAll('.winner-buttons button,.dq-btn,.noshow-btn').forEach(b=>b.disabled=false);console.error(e);alert('The decision was NOT saved. Please check the connection and try again. '+(e.message||e));}
+}
+function awardWinner(winner){
+  if(resultSent||resultSaving)return;
+  const round=Number(document.getElementById('round').value)||1;
+  if(round<1||round>3)return;
+  const roundState=saveRoundDisplay(round,winner);
+  const prior=Array.isArray(window.__RADIUM_ROUND_SCORES)?window.__RADIUM_ROUND_SCORES.slice():[];
+  prior[round-1]={round,blueScore:roundState.blueScore,redScore:roundState.redScore,winnerSide:winner,blueFouls:roundState.blueFouls,redFouls:roundState.redFouls,blueDisarms:roundState.blueDisarms,redDisarms:roundState.redDisarms};
+  window.__RADIUM_ROUND_SCORES=prior;
+  setWinner(round,winner,true);
+
+  const format=document.getElementById('matchFormat')?.value||'1';
+  // A single-round match ends as soon as the official awards the round.
+  // This is the default for Combatives and prevents the scoreboard from
+  // forcing the competitors into Round 2 or Round 3.
+  if(format==='1'){
+    sendMatchResult(winner);
+    setAdvanceButton(true);
+    return;
+  }
+
+  // Optional Best-of-3 mode: only continue when the match has not yet been decided.
+  const blueWins=[1,2,3].filter(i=>document.getElementById('winner'+i)?.innerText==='BLUE').length;
+  const redWins=[1,2,3].filter(i=>document.getElementById('winner'+i)?.innerText==='RED').length;
+  const matchFinished=blueWins>=2||redWins>=2||round>=3;
+  if(matchFinished){
+    sendMatchResult(blueWins>=2?'BLUE':redWins>=2?'RED':winner);
+    setAdvanceButton(true);
+  }else{
+    document.getElementById('round').value=round+1;
+    resetRoundControls();
+    setAdvanceButton(false);
+  }
+}
+function nextRound(){
+  if(resultSent){nextMatchInBracket();return}
+  const round=Number(document.getElementById('round').value)||1;
+  const blue=parseInt(document.getElementById('blueScore').value)||0,red=parseInt(document.getElementById('redScore').value)||0;
+  if(blue===red){alert('The round is tied. Award the round winner using the ADV/official decision before moving to the next round.');return}
+  awardWinner(blue>red?'BLUE':'RED');
+}
+document.getElementById('matchFormat')?.addEventListener('change',async e=>{
+  const best3=e.target.value==='3';
+  const roundInput=document.getElementById('round');
+  if(roundInput)roundInput.disabled=!best3;
+  setAdvanceButton(false);
+  if(currentMatch?.matchId&&!e.target.disabled){
+    const fmt=best3?'best3':'single';
+    currentMatch.matchFormat=fmt;
+    try{if(window.RADIUM_DB){await window.RADIUM_DB.init();const r=await window.RADIUM_DB.update('matches',{match_format:fmt},{id:currentMatch.matchId});if(r.error)throw r.error;}}catch(err){console.error('Match format save failed:',err);alert('Match format could not be saved to Supabase. '+(err.message||err));}
+  }
+});
+setAdvanceButton(false);
+document.getElementById('matchFormat')?.dispatchEvent(new Event('change'));
+function returnToTournament(){
+  const m=currentMatch||loadCurrentMatch();
+  const target=m?.tournament?('../bracket-display.html?tournament='+encodeURIComponent(m.tournament)+(m.categoryId?'&category='+encodeURIComponent(m.categoryId):'')):'../bracket-display.html';
+  if(!resultSent && m && m.categoryId){
+    if(!confirm('This match has not been sent to the bracket. Return without confirming the result?'))return;
+  }
+  // Browser-Bracket matches explicitly return to the Browser Bracket tab.
+  // Do not accidentally focus the Admin Brackets page when this scoreboard was
+  // launched from an Admin queue or another tournament window.
+  const fromBrowserBracket=scoreQuery.get('fromBracket')==='1';
+  try{
+    if(fromBrowserBracket && window.opener&&!window.opener.closed){window.opener.focus();window.close();return;}
+  }catch(e){}
+  location.href=target;
+}
+
+/* SET WINNER */  
+  
+function setWinner(round, winner){  
+  
+    let el = document.getElementById("winner" + round);  
+  
+    let card = el.closest(".round-card");  
+  
+    card.style.background = "#111";  
+    card.style.color = "white";  
+  
+    el.innerText = winner;  
+  
+    el.className = "winner-display";  
+  
+    if(winner === "BLUE"){  
+  
+        el.classList.add("blue-win");  
+  
+        card.style.background = "#0066ff";  
+        card.style.color = "white";  
+    }  
+  
+    else if(winner === "RED"){  
+  
+        el.classList.add("red-win");  
+  
+        card.style.background = "#ff1a1a";  
+        card.style.color = "white";  
+    }  
+  
+    else{  
+  
+        el.classList.add("draw");  
+  
+        card.style.background = "gold";  
+        card.style.color = "black";  
+    }  
+  
+    checkChampion();  
+}  
+  
+/* CHECK CHAMPION */  
+  
+function checkChampion(){  
+  
+    let blueWins = 0;  
+    let redWins = 0;  
+  
+    for(let i = 1; i <= 3; i++){  
+  
+        let result =  
+            document.getElementById("winner" + i).innerText;  
+  
+        if(result === "BLUE"){  
+            blueWins++;  
+        }  
+  
+        else if(result === "RED"){  
+            redWins++;  
+        }  
+    }  
+  
+    document.getElementById("blueChampion").innerText = "";  
+    document.getElementById("redChampion").innerText = "";  
+  
+    if(blueWins >= 2){
+        document.getElementById("blueChampion").innerText = "CHAMPION";
+        sendMatchResult("BLUE");
+    }
+    else if(redWins >= 2){
+        document.getElementById("redChampion").innerText = "CHAMPION";
+        sendMatchResult("RED");
+    }  
+}  
+  
+/* FULLSCREEN MODE */
+
+function toggleFullscreen(){
+
+    if(!document.fullscreenElement){
+
+        document.documentElement.requestFullscreen();
+
+    } else {
+
+        if(document.exitFullscreen){
+
+            document.exitFullscreen();
+        }
+    }
+}
+  
+/* TIMER DISPLAY — millisecond precision */
+function formatCountdown(ms){
+    ms=Math.max(0,Math.round(ms));
+    const mins=Math.floor(ms/60000), secs=Math.floor((ms%60000)/1000), milli=ms%1000;
+    return String(mins).padStart(2,'0')+":"+String(secs).padStart(2,'0')+"."+String(milli).padStart(3,'0');
+}
+function updateTimer(){
+    const formatted=formatCountdown(remainingMs);
+    const parts=formatted.split('.');
+    const main=document.getElementById('timerMain'),ms=document.getElementById('timerMs'),edit=document.getElementById('timer');
+    if(main)main.textContent=parts[0];
+    if(ms)ms.textContent='.'+(parts[1]||'000');
+    if(edit&&!document.getElementById('timerWrap')?.classList.contains('editing'))edit.value=formatted;
+}
+function manualTimeEdit(){
+    const value=document.getElementById("timer").value.trim();
+    const m=value.match(/^(\d+):(\d{1,2})(?:\.(\d{1,3}))?$/);
+    if(!m)return;
+    const mins=parseInt(m[1],10),secs=parseInt(m[2],10),milli=parseInt((m[3]||'0').padEnd(3,'0'),10);
+    if(secs>59)return;
+    remainingMs=Math.max(0,mins*60000+secs*1000+milli);
+    updateTimer();
+}
+document.getElementById('timerDisplay')?.addEventListener('click',()=>{
+    if(isRunning)return;
+    const wrap=document.getElementById('timerWrap'),input=document.getElementById('timer');
+    wrap?.classList.add('editing'); input?.focus(); input?.select();
+});
+document.getElementById('timer')?.addEventListener('blur',()=>{manualTimeEdit();document.getElementById('timerWrap')?.classList.remove('editing')});
+
+/* AUTOMATIC ROUND DECISION — fires when the clock hits 00:00.
+   No manual AWARD click needed. Priority: foul disqualification,
+   then higher score, then recorded advantage (ADV) as a tiebreaker. */
+function autoDecideRoundWinner(){
+    if(resultSent)return;
+    const blueScore=parseInt(document.getElementById("blueScore").value)||0;
+    const redScore=parseInt(document.getElementById("redScore").value)||0;
+    const blueAdv=document.getElementById("blueAdv").checked,redAdv=document.getElementById("redAdv").checked;
+    let blueFouls=0,redFouls=0;
+    if(document.getElementById("bf1").checked)blueFouls++;if(document.getElementById("bf2").checked)blueFouls++;if(document.getElementById("bf3").checked)blueFouls++;
+    if(document.getElementById("rf1").checked)redFouls++;if(document.getElementById("rf2").checked)redFouls++;if(document.getElementById("rf3").checked)redFouls++;
+    let blueDisarms=0,redDisarms=0;
+    if(document.getElementById("bd1").checked)blueDisarms++;if(document.getElementById("bd2").checked)blueDisarms++;
+    if(document.getElementById("rd1").checked)redDisarms++;if(document.getElementById("rd2").checked)redDisarms++;
+
+    let winner=null,reason='';
+    // Disqualification checks take priority over everything else.
+    if(blueFouls>=3){winner='RED';reason='BLUE disqualified — 3 fouls';}
+    else if(redFouls>=3){winner='BLUE';reason='RED disqualified — 3 fouls';}
+    else if(blueDisarms>=2){winner='RED';reason='BLUE disqualified — 2 disarms';}
+    else if(redDisarms>=2){winner='BLUE';reason='RED disqualified — 2 disarms';}
+    // Clear score decides it.
+    else if(blueScore>redScore){winner='BLUE';reason='Higher score';}
+    else if(redScore>blueScore){winner='RED';reason='Higher score';}
+    // Score tied: advantage decides, UNLESS the ADV holder has a foul —
+    // in that case the opponent is awarded the round instead.
+    else if(blueAdv&&!redAdv){
+        if(blueFouls>=1){winner='RED';reason='Score tied — BLUE held advantage but has a foul; RED awarded';}
+        else{winner='BLUE';reason='Score tied — decided by recorded advantage';}
+    }
+    else if(redAdv&&!blueAdv){
+        if(redFouls>=1){winner='BLUE';reason='Score tied — RED held advantage but has a foul; BLUE awarded';}
+        else{winner='RED';reason='Score tied — decided by recorded advantage';}
+    }
+
+    if(winner){
+        awardWinner(winner);
+        const info=document.getElementById('matchInfo');
+        if(info)info.dataset.lastDecision=reason;
+    }else{
+        alert('Time is up and the round is tied with no recorded advantage. Award the round winner manually using AWARD BLUE / AWARD RED.');
+    }
+}
+async function markMatchStarted(){
+    if(!currentMatch?.matchId||!window.RADIUM_DB)return;
+    if(currentMatch.status==='IN_PROGRESS'||currentMatch.status==='COMPLETED'||currentMatch.startedAt)return;
+    await window.RADIUM_DB.init();
+    const r=await window.RADIUM_DB.update('matches',{status:'IN_PROGRESS',started_at:new Date().toISOString(),match_format:currentMatch.matchFormat||'single'},{id:currentMatch.matchId});
+    if(r.error)throw r.error;
+    currentMatch.status='IN_PROGRESS';currentMatch.startedAt=new Date().toISOString();
+    const fmt=document.getElementById('matchFormat');if(fmt)fmt.disabled=true;
+}
+function syncMatchFormatLock(){const fmt=document.getElementById('matchFormat');if(!fmt)return;const locked=!!(currentMatch?.status==='IN_PROGRESS'||currentMatch?.status==='COMPLETED'||currentMatch?.startedAt||window.__RADIUM_ROUND_SCORES?.some(Boolean)||completedResultEdit);fmt.disabled=locked;}
+function startTimer(){
+    if(isRunning)return;
+    markMatchStarted().then(()=>{
+      syncMatchFormatLock();
+      manualTimeEdit();
+      if(remainingMs<=0)return;
+      isRunning=true;
+      let last=performance.now();
+      clearInterval(timerInterval);
+      timerInterval=setInterval(()=>{
+        const now=performance.now();
+        remainingMs=Math.max(0,remainingMs-(now-last));
+        last=now;
+        updateTimer();
+        if(remainingMs<=0){
+          clearInterval(timerInterval);isRunning=false;playBuzzer();
+          autoDecideRoundWinner();
+        }
+      },50);
+    }).catch(e=>{console.error('Match start save failed:',e);alert('The match could not be started. '+(e.message||e));});
+}
+/* PAUSE */  
+  
+function pauseTimer(){  
+  
+    clearInterval(timerInterval);  
+  
+    isRunning = false;  
+}  
+  
+/* FULL RESET */  
+  
+function editCompletedResult(){
+  if(!resultSent)return;
+  completedResultEdit=true;
+  resultSent=false;
+  const stored=Array.isArray(currentMatch?.metadata?.roundScores)?currentMatch.metadata.roundScores:[];
+  window.__RADIUM_ROUND_SCORES=stored.map(x=>x?({...x}):x);
+  const fmt=currentMatch?.matchFormat==='best3'?'3':'1';const formatEl=document.getElementById('matchFormat');if(formatEl){formatEl.value=fmt;formatEl.disabled=true;}
+  const last=window.__RADIUM_ROUND_SCORES.filter(Boolean).slice(-1)[0];
+  if(last){document.getElementById('round').value=last.round||1;document.getElementById('blueScore').value=Number(last.blueScore)||0;document.getElementById('redScore').value=Number(last.redScore)||0;saveRoundDisplay(Number(last.round)||1,last.winnerSide);}
+  document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=false);
+  const eb=document.getElementById('editCompletedBtn');if(eb)eb.style.display='none';
+  setAdvanceButton(false);
+  toast('EDIT MODE: original scores restored. Correct the result and AWARD WINNER to save the correction.');
+}
+function resetTimer(){  
+  
+    if(resultSent&&!completedResultEdit){alert('This match is already finalized. Use EDIT RESULT if a correction is required.');return;}
+    if(resultSaving)return;
+    if(completedResultEdit)return alert('Use the restored round data above to correct the result. RESET is disabled during EDIT RESULT.');
+    resultSent=false;
+    document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=false);
+    clearInterval(timerInterval);  
+  
+    isRunning = false;  
+  
+    remainingMs = roundDurationSeconds * 1000;  
+  
+    updateTimer();  
+  
+    document.getElementById("blueScore").value = 0;  
+    document.getElementById("redScore").value = 0;  
+  
+    document.getElementById("round").value = 1;
+    window.__RADIUM_ROUND_SCORES=[];
+    setAdvanceButton(false);  
+  
+    for(let i = 1; i <= 3; i++){  
+  
+        let winner =  
+            document.getElementById("winner" + i);  
+  
+        let card =  
+            winner.closest(".round-card");  
+  
+        winner.innerText = "---";  
+  
+        winner.className = "winner-display";  
+  
+        document.getElementById("score" + i).innerText =  
+            "0 - 0";  
+  
+        document.getElementById("stats" + i).innerText =  
+            "F:0-0 | D:0-0";  
+  
+        /* RESET CARD COLORS */  
+  
+        card.style.background = "";  
+        card.style.color = "white";  
+    }  
+  
+    document.getElementById("blueChampion").innerText = "";  
+    document.getElementById("redChampion").innerText = "";  
+  
+    document.getElementById("blueAdv").checked = false;  
+    document.getElementById("redAdv").checked = false;  
+  
+    document.getElementById("bf1").checked = false;  
+    document.getElementById("bf2").checked = false;  
+    document.getElementById("bf3").checked = false;  
+  
+    document.getElementById("rf1").checked = false;  
+    document.getElementById("rf2").checked = false;  
+    document.getElementById("rf3").checked = false;  
+  
+    document.getElementById("bd1").checked = false;  
+    document.getElementById("bd2").checked = false;  
+  
+    document.getElementById("rd1").checked = false;  
+    document.getElementById("rd2").checked = false;  
+}  
+  
+/* KEYBOARD SHORTCUTS */  
+  
+document.addEventListener("keydown", function(event){  
+  
+    let key = event.key.toLowerCase();  
+  
+    if(event.code === "Space"){  
+  
+        event.preventDefault();  
+  
+        if(isRunning){  
+  
+            pauseTimer();  
+        }  
+  
+        else{  
+  
+            startTimer();  
+        }  
+    }
+    if(key === "f"){
+
+        toggleFullscreen();
+    }
+  
+  
+    if(key === "r"){  
+  
+        resetTimer();  
+    }  
+  
+    if(key === "o"){  
+  
+        adjust("blueScore",1);  
+    }  
+  
+    if(key === "l"){  
+  
+        adjust("blueScore",-1);  
+    }  
+  
+    if(key === "q"){  
+  
+        adjust("redScore",1);  
+    }  
+  
+    if(key === "a"){  
+  
+        adjust("redScore",-1);  
+    }  
+}); 
+/* PLAY BUZZER */
+
+function playBuzzer(){
+
+    let buzzer =
+        document.getElementById("buzzerSound");
+
+    buzzer.currentTime = 5;
+
+    buzzer.play();
+}  
+loadTournamentBranding().finally(()=>loadCurrentMatch()).then(()=>{document.getElementById('matchFormat')?.dispatchEvent(new Event('change'));syncMatchFormatLock();});
+updateTimer();
+  
+</script>
+<audio id="buzzerSound">
+    <source src="../buzzer.mp3" type="audio/mpeg">
+</audio></body>
+</html>  

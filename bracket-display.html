@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>RADIUM — Live Bracket Display</title>
+<style>
+:root{--bg:#07111f;--panel:#0d1b2e;--panel2:#12253c;--ink:#f4f8ff;--muted:#9fb0c5;--line:#29435f;--accent:#f5b51b;--accent2:#1f78ff;--blue:#2f8cff;--red:#ef4654;--green:#20c77a;--shadow:0 8px 24px rgba(0,0,0,.28)}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Arial,Helvetica,sans-serif;background:radial-gradient(circle at top,#102642 0,#07111f 45%,#050b13 100%);color:var(--ink)}
+body{overflow:auto}.top{position:sticky;top:0;z-index:20;background:rgba(5,13,23,.96);backdrop-filter:blur(10px);color:#fff;padding:12px 18px;border-bottom:2px solid var(--accent);box-shadow:0 4px 18px rgba(0,0,0,.3)}
+.toprow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.brandrow{display:flex;align-items:center;gap:12px}.brand-logo{width:52px;height:52px;object-fit:contain;border-radius:50%;background:#fff;padding:2px}.brand{font-size:20px;font-weight:900;letter-spacing:.8px}.sub{font-size:12px;color:#c3d2e4}.status{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:11px;font-weight:900}.dot{width:9px;height:9px;border-radius:50%;background:#f3aa18}.dot.ok{background:#16c66a}.dot.bad{background:#e63b47}
+.controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px}.controls select,.controls button{height:40px;border-radius:7px;border:1px solid #3a5878;font:inherit}.controls select{min-width:290px;background:#fff;color:#172033;padding:0 10px}.controls button{background:var(--accent2);color:#fff;padding:0 13px;font-weight:900;cursor:pointer}.controls button.secondary{background:#fff;color:#102a45}.controls button.warn{background:#f0a51a;color:#111}.controls button.danger{background:#d93649;color:#fff}.controls button.success{background:#16a86a;color:#fff}.controls button:disabled{opacity:.45;cursor:not-allowed}.control-note{font-size:10px;color:#9fb0c5;margin-top:6px}.meta{font-size:11px;color:#aabbd0;margin-top:8px;min-height:14px}
+.main{padding:18px;max-width:2400px;margin:auto}.notice{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 16px;box-shadow:var(--shadow);margin-bottom:14px;color:#dfe9f5}.notice.error{border-left:5px solid var(--red)}.notice.ok{border-left:5px solid var(--green)}
+.bracket-wrap{position:relative;background:rgba(10,24,40,.9);border:1px solid #28425e;border-radius:12px;box-shadow:var(--shadow);padding:16px;overflow:auto;min-height:520px}.bracket{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(225px,1fr);gap:64px;align-items:start;min-width:max-content;padding:8px 18px 36px}.round{width:225px;position:relative;z-index:2}.round h3{text-align:center;margin:0 0 14px;background:linear-gradient(135deg,#183958,#0e2239);color:#fff;border:1px solid #365777;border-radius:7px;padding:9px;font-size:12px;letter-spacing:.6px}.matches{position:relative;display:flex;flex-direction:column;min-height:120px}.match{width:225px;background:var(--panel2);border:1px solid #38526e;border-radius:8px;box-shadow:0 5px 14px rgba(0,0,0,.28);overflow:hidden;position:relative;cursor:pointer;transition:.15s transform,.15s border-color,.15s box-shadow}.match:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 8px 22px rgba(0,0,0,.4)}.match-label{font-size:9px;font-weight:900;color:#b8c9dc;background:#0a1828;border-bottom:1px solid #29425c;padding:6px 8px}.fighter{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:9px 9px;border-left:5px solid #718198;min-height:40px}.fighter.red{border-left-color:var(--red)}.fighter.blue{border-left-color:var(--blue)}.fighter.winner{background:rgba(32,199,122,.14)}.fighter.waiting{color:#718198;background:#0a1523}.fighter-name{font-weight:900;font-size:12px;line-height:1.12}.fighter-meta{display:block;font-size:8px;color:#91a4ba;margin-top:3px;font-weight:500}.score{font-weight:900;font-size:13px;min-width:22px;text-align:right}.vs{font-size:8px;text-align:center;color:#7f92aa;background:#091625;border-top:1px solid #1d334a;border-bottom:1px solid #1d334a;padding:2px}.state{padding:6px 9px;background:#0a1828;color:#8497ad;border-top:1px solid #29425c;font-size:8px;font-weight:900;text-transform:uppercase}.state.done{color:#4ce69b;background:#09251a}.state.bye{color:#f4ce58;background:#2b2208}.match.startable{outline:1px solid rgba(245,181,27,.45)}.match.flow-next{outline:3px solid var(--accent);box-shadow:0 0 0 2px rgba(245,181,27,.2),0 10px 28px rgba(245,181,27,.18)}.match.flow-next .match-label:after{content:' • NEXT IN MATCH FLOW';color:#ffd45b;font-weight:900}.match.startable .state{color:#ffd45b}.bye-entry{width:225px;min-height:52px;display:flex;align-items:center;gap:8px;padding:9px;border:1px dashed #20c77a;border-radius:8px;background:#09251a;color:#eaf8f0}.bye-tag{padding:4px 7px;border-radius:4px;background:#20c77a;color:#062014;font-size:9px;font-weight:900}.bye-entry b{font-size:12px}.bye-entry small{margin-left:auto;color:#4ce69b;font-size:8px;font-weight:900}
+.champion{width:225px;align-self:center;background:linear-gradient(135deg,#11965b,#087044);color:#fff;border:1px solid #4be29a;border-radius:9px;padding:18px;text-align:center;box-shadow:var(--shadow)}.champion small{display:block;font-size:9px;letter-spacing:1px;opacity:.85}.champion b{display:block;font-size:20px;margin-top:7px}.empty{padding:45px 20px;text-align:center;color:var(--muted)}
+.tree-lines{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:visible}.tree-lines path{fill:none;stroke:#5d7896;stroke-width:2;opacity:.75}.tree-lines path.active{stroke:var(--accent);stroke-width:2.5;opacity:1}
+#printHeader{display:none}
+/* Tree spacing: each round is centered between the two feeder matches. */
+.round:nth-child(1) .matches{gap:18px}.round:nth-child(2) .matches{padding-top:29px;gap:70px}.round:nth-child(3) .matches{padding-top:94px;gap:174px}.round:nth-child(4) .matches{padding-top:224px;gap:382px}.round:nth-child(5) .matches{padding-top:484px}
+@media(max-width:900px){.top{position:relative}.main{padding:9px}.bracket-wrap{padding:8px}.bracket{gap:42px;grid-auto-columns:205px}.round,.match,.champion{width:205px}.round:nth-child(2) .matches{padding-top:29px;gap:62px}.round:nth-child(3) .matches{padding-top:86px;gap:152px}.round:nth-child(4) .matches{padding-top:198px;gap:335px}.round:nth-child(5) .matches{padding-top:430px}}
+@media print{
+ @page{size:A4 landscape;margin:5mm}
+ html,body{background:#fff!important;color:#111!important;width:100%;height:auto;overflow:visible}
+ .top{position:static;background:#fff!important;color:#111!important;border-bottom:1px solid #222;box-shadow:none;padding:0 0 4mm}
+ #printHeader{display:flex!important;align-items:center;gap:4mm;margin-bottom:3mm} #printHeader img{width:15mm;height:15mm;object-fit:contain} #printHeader strong{display:block;font-size:13pt} #printHeader span{display:block;font-size:9pt}
+ .brand-logo{width:18mm;height:18mm}.brand{font-size:16pt;color:#111}.sub,.meta{color:#333!important}.status,.controls,.notice{display:none!important}
+ .main{padding:0;max-width:none}.bracket-wrap{border:0;box-shadow:none;background:#fff;padding:2mm 0 0;overflow:visible;min-height:0}
+ .bracket{display:grid;grid-auto-flow:column;grid-template-columns:repeat(var(--round-count),minmax(0,1fr));grid-auto-columns:auto;gap:3mm;min-width:0;width:100%;padding:0;align-items:start}
+ .round{width:auto}.round h3{background:#142c46!important;color:#fff!important;border:1px solid #142c46;padding:2mm 1mm;font-size:7pt;margin-bottom:3mm}
+ .matches{min-height:0}.match{width:100%;border:1px solid #444;box-shadow:none;border-radius:2mm;cursor:default}.match-label{font-size:5.5pt;padding:1.2mm 1.5mm}.fighter{min-height:0;padding:1.8mm 1.5mm;border-left-width:3px}.fighter-name{font-size:7pt}.fighter-meta{font-size:5pt}.score{font-size:7pt}.vs{font-size:5pt;padding:.4mm}.state{font-size:5pt;padding:1.2mm 1.5mm}.champion{width:100%;padding:3mm;border:1px solid #333;box-shadow:none}.champion b{font-size:11pt}.tree-lines{display:none}
+ .round:nth-child(1) .matches{gap:2.5mm}.round:nth-child(2) .matches{padding-top:8mm;gap:18mm}.round:nth-child(3) .matches{padding-top:24mm;gap:45mm}.round:nth-child(4) .matches{padding-top:55mm;gap:98mm}.round:nth-child(5) .matches{padding-top:120mm}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="toprow">
+    <div class="brandrow"><img class="brand-logo" src="Logo1.webp" alt="RADIUM Logo"><div><div class="brand">RADIUM LIVE BRACKET</div><div class="sub" id="tournamentName">Connecting…</div></div></div>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">CONNECTING</span></div>
+  </div>
+  <div class="controls">
+    <select id="categorySelect"><option>Loading categories…</option></select>
+    <button id="refreshBtn" class="secondary">REFRESH NOW</button>
+    <button class="secondary" id="printBtn">PRINT</button>
+    <button class="secondary" id="adminBtn">OPEN ADMIN</button>
+  </div>
+  <div class="meta" id="meta">This display reads the official tournament data.</div><div class="control-note" id="controlNote">LIVE MODE • Select a category, open any READY match, score it, and the winner will advance. Bracket generation, regeneration, seeding and locking are managed only from Admin → Brackets.</div>
+</header>
+<main class="main"><div id="printHeader" style="display:none"><img src="Logo1.webp" alt="RADIUM Logo"><div><strong id="printTournament"></strong><span id="printCategory"></span></div></div>
+  <div id="notice" class="notice">Loading tournament…</div>
+  <div class="bracket-wrap"><svg id="treeLines" class="tree-lines" aria-hidden="true"></svg><div id="bracket" class="bracket"><div class="empty">Waiting for tournament data…</div></div></div>
+</main>
+<script src="db/supabase-config.js"></script>
+<script>
+(function(){
+'use strict';
+const cfg=window.RADIUM_SUPABASE_CONFIG||{};
+let client=null,row=null,selectedId='',timer=null,channel=null;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const params=new URLSearchParams(location.search); const requestedId=params.get('tournament')||params.get('tournament_id')||''; const requestedCategory=params.get('category')||params.get('category_id')||''; const requestedRole=String(params.get('role')||'').toUpperCase(); selectedId=requestedCategory;let flowManualSelection=!!requestedCategory;
+function setStatus(ok,text){$('statusDot').className='dot '+(ok?'ok':'bad');$('statusText').textContent=text}
+function setNotice(text,kind=''){const n=$('notice');n.className='notice '+kind;n.textContent=text}
+function playerMap(settings){const m=new Map();(settings?.players||[]).forEach(p=>m.set(String(p.id),p));return m}
+function teamMap(settings){const m=new Map();(settings?.teams||[]).forEach(t=>m.set(String(t.id),t));return m}
+function nameFor(id,pm){if(!id)return 'WAITING';const p=pm.get(String(id));return p?.name||String(id)}
+function metaFor(id,pm,tm){const p=pm.get(String(id));if(!p)return '';const t=p.teamId?tm.get(String(p.teamId))?.name:'';return [t,p.seed?'SEED '+p.seed:''].filter(Boolean).join(' • ')}
+function roundName(i,total){const n=total-i;if(n===1)return 'FINAL';if(n===2)return 'SEMIFINAL';if(n===3)return 'QUARTERFINAL';if(n===4)return 'ROUND OF 16';return 'ROUND '+(i+1)}
+function matchFlowSexRank(c,flow){const sex=String(c?.sex||c?.gender||'Mixed').toLowerCase();if(flow==='BOYS_FIRST'||flow==='ROUND_BOYS_FIRST')return sex==='male'||sex==='boys'?0:sex==='female'||sex==='girls'?1:2;if(flow==='GIRLS_FIRST'||flow==='ROUND_GIRLS_FIRST')return sex==='female'||sex==='girls'?0:sex==='male'||sex==='boys'?1:2;return 0;}
+function matchFlowCategoryRank(c){const n=String(c?.name||'').toLowerCase().replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();if(/\bpinweight\b/.test(n))return 0;if(/\bbantamweight\b|\bbantam\b/.test(n))return 1;if(/\bfeatherweight\b|\bfeather\b/.test(n))return 2;if(/\bextra\s*lightweight\b|\bextra\s*light\s*weight\b/.test(n))return 3;if(/\bhalf\s*lightweight\b|\bhalf\s*light\s*weight\b/.test(n))return 4;if(/\bespada\s*y\s*daga\b/.test(n))return 12;if(/\bdouble\s+weapon\b/.test(n))return 11;if(/\bsingle\s+weapon\b/.test(n))return 10;return 100;}
+function matchFlowCompareRows(rows,flow){const f=String(flow||'ROUND_CATEGORY').toUpperCase();return (rows||[]).slice().sort((a,b)=>{const ca=a?.c||{},cb=b?.c||{};const sa=matchFlowSexRank(ca,f),sb=matchFlowSexRank(cb,f);const ra=Number(a?.ri)||0,rb=Number(b?.ri)||0,ma=Number(a?.mi)||0,mb=Number(b?.mi)||0,ka=matchFlowCategoryRank(ca),kb=matchFlowCategoryRank(cb),na=String(ca?.name||''),nb=String(cb?.name||'');if(f==='BOYS_FIRST'||f==='GIRLS_FIRST')return sa-sb||ka-kb||na.localeCompare(nb)||ra-rb||ma-mb;if(f==='ROUND_BOYS_FIRST'||f==='ROUND_GIRLS_FIRST')return ra-rb||sa-sb||ka-kb||na.localeCompare(nb)||ma-mb;return ra-rb||ka-kb||na.localeCompare(nb)||sa-sb||ma-mb;});}
+function liveFlowRows(settings){const rows=[];for(const c of (settings?.categories||[])){if(!c||c.event==='Arnis Anyo'||!c.bracket?.rounds)continue;for(const [ri,round] of c.bracket.rounds.entries())for(const [mi,m] of (round||[]).entries())if(m)rows.push({c,ri,mi,m});}return rows;}
+function liveOrderedReady(settings){const flow=String(settings?.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase();const rows=liveFlowRows(settings);const ready=rows.filter(x=>x.m&&!x.m.completed&&x.m.red&&x.m.blue);if(!ready.length)return [];if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){const unfinished=rows.filter(x=>x.m&&!x.m.completed&&x.m.red&&x.m.blue);if(!unfinished.length)return [];const minRound=Math.min(...unfinished.map(x=>Number(x.ri)||0));return matchFlowCompareRows(ready.filter(x=>(Number(x.ri)||0)===minRound),flow);}return matchFlowCompareRows(ready,flow);}
+function flowSortedCategories(cats,flow){return [...(cats||[])].sort((a,b)=>{const sa=matchFlowSexRank(a,flow),sb=matchFlowSexRank(b,flow),ka=matchFlowCategoryRank(a),kb=matchFlowCategoryRank(b);return (flow==='BOYS_FIRST'||flow==='GIRLS_FIRST'?sa-sb||ka-kb:ka-kb||sa-sb)||String(a.name||'').localeCompare(String(b.name||''));});}
+function score(m,side){const bye=side==='red'?m.redBye:m.blueBye;if(bye)return '<span class="score">BYE</span>';if(!m.completed)return '';const v=side==='red'?m.redScore:m.blueScore;return '<span class="score">'+esc(v??'—')+'</span>'}
+function matchHtml(m,ri,mi,pm,tm,b){
+  const red=m.red,blue=m.blue,w=m.winner;
+  const redName=nameFor(red,pm),blueName=nameFor(blue,pm);
+  const redMeta=metaFor(red,pm,tm),blueMeta=metaFor(blue,pm,tm);
+  const done=!!m.completed, playable=!!(red&&blue), bye=(m.redBye||m.blueBye)&&done;
+  let state=done?(w?'RESULT CONFIRMED':'BYE ADVANCED'):(playable?'READY':'WAITING');
+  if(bye)state='BYE ADVANCED';
+  const label=b.mode==='roundrobin'?`ROUND ${ri+1} · GAME ${mi+1}`:`${roundName(ri,b.rounds.length)} · MATCH ${mi+1}`;
+  const clickable=!!(red&&blue&&!done);
+  return `<div class="match ${clickable?'startable':''}" role="button" tabindex="0" data-ri="${ri}" data-mi="${mi}" data-id="${esc(m.id||'')}"><div class="match-label">${ri===b.rounds.length-1?'🏆 ':''}${esc(label)}${clickable?' • TAP TO SCORE':''}</div><div class="fighter red ${w===red?'winner':''} ${!red?'waiting':''}"><div><div class="fighter-name">${esc(redName)}</div>${redMeta?`<small class="fighter-meta">${esc(redMeta)}</small>`:''}</div>${score(m,'red')}</div><div class="vs">VS</div><div class="fighter blue ${w===blue?'winner':''} ${!blue?'waiting':''}"><div><div class="fighter-name">${esc(blueName)}</div>${blueMeta?`<small class="fighter-meta">${esc(blueMeta)}</small>`:''}</div>${score(m,'blue')}</div><div class="state ${done?'done':''} ${bye?'bye':''}">${state}</div></div>`;
+}
+function openScoreboard(ri,mi){
+  const settings=tournamentSettings();
+  const cats=(Array.isArray(settings.categories)?settings.categories:[]).filter(c=>c&&c.event!=='Arnis Anyo');
+  const c=cats.find(x=>String(x.id)===String(selectedId));
+  const m=c?.bracket?.rounds?.[ri]?.[mi];
+  if(!c||!m||!m.red||!m.blue||m.completed)return;
+  const court=Number(m.court)||1;
+  // Bracket indexes are zero-based; scoreboard context is one-based.
+  const params=new URLSearchParams({court:String(court),tournament:String(row?.id||''),categoryId:String(c.id),categoryName:c.name||'',event:c.event||'',round:String(ri+1),match:String(mi+1),red:String(m.red),blue:String(m.blue),redName:nameFor(m.red,playerMap(settings)),blueName:nameFor(m.blue,playerMap(settings)),matchFormat:'single',fromBracket:'1',role:requestedRole});
+  const url='scoreboard/index.html?'+params.toString();
+  const w=window.open(url,'RADIUM_SCOREBOARD_COURT_'+court);
+  if(!w){setNotice('Pop-up blocked. Allow pop-ups for RADIUM to open the scoreboard.','error');return;}
+  try{w.focus()}catch(e){}
+}
+function wireMatchClicks(){
+  document.querySelectorAll('#bracket .match.startable').forEach(el=>{
+    const go=()=>openScoreboard(Number(el.dataset.ri),Number(el.dataset.mi));
+    el.onclick=go;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();go()}};
+  });
+}
+function drawTree(){
+  const svg=$('treeLines'),wrap=document.querySelector('.bracket-wrap');if(!svg||!wrap)return;
+  const matches=[...document.querySelectorAll('#bracket .match[data-id]')];if(!matches.length)return;
+  const byId=new Map(matches.map(x=>[x.dataset.id,x]));const wr=wrap.getBoundingClientRect();svg.setAttribute('width',wrap.scrollWidth);svg.setAttribute('height',wrap.scrollHeight);svg.setAttribute('viewBox',`0 0 ${wrap.scrollWidth} ${wrap.scrollHeight}`);svg.innerHTML='';
+  const draw=(from,to)=>{if(!from||!to)return;const a=from.getBoundingClientRect(),z=to.getBoundingClientRect(),x1=a.right-wr.left,y1=a.top-wr.top+a.height/2,x2=z.left-wr.left,y2=z.top-wr.top+z.height/2,mid=Math.min(x2-18,(x1+x2)/2+18);const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`);svg.appendChild(path)};
+  const b=selectedCategory()?.bracket;if(!b)return;for(const round of b.rounds||[])for(const m of round)if(m.nextMatchId)draw(byId.get(m.id),byId.get(m.nextMatchId));
+  for(const x of (b.byeEntries||[])){if(!x.targetMatchId)continue;const bye=document.querySelector(`.bye-entry[data-target-match="${CSS.escape(x.targetMatchId)}"]`);draw(bye,byId.get(x.targetMatchId));}
+}
+function nextPow(n){let x=1;while(x<n)x*=2;return x}
+function uid(){return crypto.randomUUID?crypto.randomUUID():'m_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2)}
+function shuffle(a){const x=[...a];for(let i=x.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[x[i],x[j]]=[x[j],x[i]]}return x}
+function playerEligible(p,c){
+  if(!p||!c)return false;
+  const sex=(c.sex||'Male');
+  if(sex!=='Mixed' && String(p.sex||'').toLowerCase()!==String(sex).toLowerCase())return false;
+  const age=Number(p.age); if(!Number.isFinite(age))return false;
+  if(age<Number(c.ageFrom??0)||age>Number(c.ageTo??999))return false;
+  const w=Number(p.weight||0);
+  if(Number(c.weightFrom??0)>0 && w<Number(c.weightFrom))return false;
+  if(Number(c.weightTo??999)<999 && w>Number(c.weightTo))return false;
+  return true;
+}
+function standardSeedOrder(size){let seeds=[1];for(let n=2;n<=size;n*=2)seeds=seeds.flatMap(x=>[x,n+1-x]);return seeds}
+function seedPlayers(ps,c,tm){
+  let a=[...ps];
+  if(c.draw==='seed'){const size=nextPow(a.length),bySeed=new Map();a.forEach(p=>{const seed=Number(p.categorySeeds?.[c.id]?.seed??p.seed);if(Number.isFinite(seed)&&seed>0&&!bySeed.has(seed)&&seed<=size)bySeed.set(seed,p)});return standardSeedOrder(size).map(seed=>bySeed.get(seed)||null)}
+  if(c.draw==='team'){
+    const teams=[...new Set(a.map(p=>p.teamId).filter(Boolean))];
+    teams.sort((x,y)=>(tm.get(String(x))?.name||'').localeCompare(tm.get(String(y))?.name||''));
+    const out=[];let guard=0;
+    while(a.length && guard++<10000){
+      let moved=false;
+      for(const tid of teams){const i=a.findIndex(p=>p.teamId===tid);if(i>=0){out.push(a.splice(i,1)[0]);moved=true}}
+      if(!moved)break;
+    }
+    return out.concat(a);
+  }
+  return shuffle(a);
+}
+function createMatch(red=null,blue=null){return{id:uid(),red,blue,redScore:0,blueScore:0,completed:false,winner:null,redBye:false,blueBye:false,court:null,history:[]}}
+function byeIndexes(matchCount,byeCount){
+  const out=new Set();if(!byeCount)return out;const size=matchCount*2,seeds=standardSeedOrder(size);for(let seed=1;seed<=byeCount;seed++){const pos=seeds.indexOf(seed);if(pos>=0)out.add(Math.floor(pos/2));}return out;
+}
+function advanceGenerated(b,r,mi,w,auto=false){
+  if(!w||b.mode==='roundrobin')return;
+  const m=b.rounds?.[r]?.[mi];if(!m)return;
+  if(r===b.rounds.length-1){b.champion=w;return}
+  if(m.nextMatchId){for(const round of b.rounds){const nm=round.find(x=>x.id===m.nextMatchId);if(nm){nm[m.nextSlot||'red']=w;return}}}
+}
+function buildSingleBracket(c,players,tm){
+  const size=nextPow(players.length),arr=seedPlayers(players,c,tm),byes=size-players.length,firstPairCount=size/2;
+  const bye=byeIndexes(firstPairCount,byes),roundLists=[[]],byeEntries=[];let pi=0,next=[];
+  for(let mi=0;mi<firstPairCount;mi++){
+    const left=arr[pi++]?.id||null,right=bye.has(mi)?null:(arr[pi++]?.id||null);
+    if(left&&right){const m=createMatch(left,right);m.firstRoundPosition=mi;roundLists[0].push(m);next.push({kind:'match',matchId:m.id,count:2,playerId:null});}
+    else if(left||right){const playerId=left||right;byeEntries.push({playerId,targetMatchId:null,targetSlot:null,firstRoundPosition:mi});next.push({kind:'player',playerId,count:1});}
+  }
+  while(next.length>1){const parents=[],desc=[];for(let i=0;i<next.length;i+=2){const left=next[i],right=next[i+1]||null,total=(left?.count||0)+(right?.count||0);if(total===0)continue;if(total===1){const one=left?.count?left:right;desc.push({kind:'player',playerId:one.playerId,count:1});continue;}const redPlayer=(left?.kind==='player'&&right?.kind!=='match')?left.playerId:null;const bluePlayer=(right?.kind==='player'&&left?.kind!=='match')?right.playerId:(left?.kind==='player'&&right?.kind==='match')?left.playerId:null;const m=createMatch(redPlayer,bluePlayer);if(left?.kind==='match'){const child=findGeneratedMatch(roundLists,left.matchId);if(child){child.nextMatchId=m.id;child.nextSlot='red';}}if(right?.kind==='match'){const child=findGeneratedMatch(roundLists,right.matchId);if(child){child.nextMatchId=m.id;child.nextSlot=left?.kind==='match'?'blue':'red';}}if(left?.kind==='player'){const be=byeEntries.find(x=>x.playerId===left.playerId&&!x.targetMatchId);if(be){be.targetMatchId=m.id;be.targetSlot=right?.kind==='match'?'blue':'red';}}if(right?.kind==='player'){const be=byeEntries.find(x=>x.playerId===right.playerId&&!x.targetMatchId);if(be){be.targetMatchId=m.id;be.targetSlot='blue';}}parents.push(m);desc.push({kind:'match',matchId:m.id,count:total,playerId:null});}if(parents.length)roundLists.push(parents);next=desc;}
+  return{mode:'single',size,players:players.map(p=>p.id),byes,rounds:roundLists,byeEntries,playableMatches:Math.max(0,players.length-1),champion:null,locked:false,createdAt:new Date().toISOString()};
+}
+function findGeneratedMatch(rounds,id){for(const r of rounds)for(const m of r)if(m.id===id)return m;return null}
+function buildRoundRobin(c,players,tm){
+  let arr=seedPlayers(players,c,tm),list=arr.map(p=>p.id);if(list.length%2)list.push(null);const n=list.length,rounds=[];
+  for(let r=0;r<n-1;r++){const matches=[];for(let i=0;i<n/2;i++){const a=list[i],d=list[n-1-i];if(a&&d)matches.push(createMatch(a,d))}rounds.push(matches);list=[list[0],list[n-1],...list.slice(1,n-1)]}
+  return{mode:'roundrobin',size:players.length,players:players.map(p=>p.id),byes:0,rounds,champion:null,locked:false,createdAt:new Date().toISOString()};
+}
+function generateBracketForCategory(c,settings){
+  const players=settings.players||[],tm=teamMap(settings),eligible=players.filter(p=>playerEligible(p,c));
+  if(eligible.length<2)throw new Error('At least 2 eligible players are required for this category.');
+  return settings.setup?.type==='roundrobin'?buildRoundRobin(c,eligible,tm):buildSingleBracket(c,eligible,tm);
+}
+async function saveSettings(nextSettings,action){
+  if(!client||!row?.id)throw new Error('Tournament is not loaded from Supabase.');
+  const settings=JSON.parse(JSON.stringify(nextSettings||{}));
+  settings._cloud={...(settings._cloud||{}),version:2,clientSavedAt:Date.now(),savedAt:new Date().toISOString()};
+  const result=await client.from('tournaments').update({settings}).eq('id',row.id);
+  if(result.error)throw result.error;
+  row.settings=settings;row.updated_at=new Date().toISOString();
+  setNotice(action+' saved successfully.','ok');render();
+}
+async function getFreshTournamentSettings(){
+  if(!client||!row?.id)return tournamentSettings();
+  const result=await client.from('tournaments').select('settings,updated_at').eq('id',row.id).single();
+  if(result.error)throw result.error;
+  const fresh=normalizedSettings(result.data?.settings)||{};
+  row.settings=fresh;row.updated_at=result.data?.updated_at||row.updated_at;
+  return fresh;
+}
+function awardSupabaseMedal(settings,categoryId,playerId,medal){
+  if(!playerId)return;
+  settings.medals=Array.isArray(settings.medals)?settings.medals:[];
+  if(settings.medals.some(x=>String(x.categoryId)===String(categoryId)&&String(x.playerId)===String(playerId)&&x.medal===medal))return;
+  const players=Array.isArray(settings.players)?settings.players:[];
+  const pl=players.find(x=>String(x.id)===String(playerId));
+  settings.medals.push({id:'MED-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7),categoryId,playerId,teamId:pl?.teamId||'',medal,awardedAt:new Date().toISOString()});
+}
+function awardBracketMedals(settings,c,b,m){
+  if(!c||!b||!m||!m.winner)return;
+  if(b.mode==='roundrobin'){
+    if(!b.champion)return;
+    const standings={};(b.players||[]).forEach(id=>standings[id]={id,w:0,l:0,pts:0});
+    (b.rounds||[]).flat().filter(x=>x.completed).forEach(x=>{if(!standings[x.winner])return;standings[x.winner].w++;standings[x.winner].pts+=3;const loser=x.red===x.winner?x.blue:x.red;if(standings[loser])standings[loser].l++});
+    const order=Object.values(standings).sort((a,d)=>d.pts-a.pts||d.w-a.w);
+    if(order[0])awardSupabaseMedal(settings,c.id,order[0].id,'gold');
+    if(order[1])awardSupabaseMedal(settings,c.id,order[1].id,'silver');
+    if(order[2])awardSupabaseMedal(settings,c.id,order[2].id,'bronze');
+    return;
+  }
+  if(b.champion!==m.winner)return;
+  const finalLoser=m.red===m.winner?m.blue:m.red;
+  awardSupabaseMedal(settings,c.id,b.champion,'gold');
+  awardSupabaseMedal(settings,c.id,finalLoser,'silver');
+  const semi=b.rounds?.[b.rounds.length-2]||[];
+  semi.forEach(sm=>{if(sm.completed&&sm.winner){const loser=sm.red===sm.winner?sm.blue:sm.red;if(loser&&loser!==finalLoser)awardSupabaseMedal(settings,c.id,loser,'bronze')}});
+}
+
+function normalizedSettings(raw){
+  if(!raw)return {};
+  if(typeof raw==='string'){try{return JSON.parse(raw)||{}}catch(e){return {}}}
+  return raw;
+}
+function tournamentSettings(){return normalizedSettings(row?.settings);}
+async function hydrateNormalizedBracket(){
+  if(!client||!row?.id)return;
+  const [pr,mr,cr,ca,ct]=await Promise.all([
+    client.from('players').select('id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status').eq('tournament_id',row.id),
+    client.from('matches').select('id,category_id,round,match_number,bracket_position,blue_player_id,red_player_id,blue_score,red_score,winner_player_id,status,metadata,court_id').eq('tournament_id',row.id).order('round').order('match_number'),
+    client.from('categories').select('id,tournament_id,name,event_type,gender,age_min,age_max,weight_min,weight_max,division,style,weapon,judges,preset,weight_required,bracket_by,rules,bracket,registration_fee,weight_requirement').eq('tournament_id',row.id),
+    client.from('category_court_assignments').select('category_id,court_id,active').eq('tournament_id',row.id).eq('active',true),
+    client.from('courts').select('id,court_number').eq('tournament_id',row.id)
+  ]);
+  if(pr.error)throw pr.error;if(mr.error)throw mr.error;if(cr.error)throw cr.error;if(ca.error)throw ca.error;if(ct.error)throw ct.error;
+  const settings=tournamentSettings();
+  const dbCats=cr.data||[], existingCats=Array.isArray(settings.categories)?settings.categories:[];
+  if(!existingCats.length){settings.categories=dbCats.map(c=>({id:c.id,name:c.name,sex:c.gender||'Male',event:c.event_type==='Anyo'?'Arnis Anyo':(c.event_type==='Livestick'?'Livestick':'Padded Stick'),eventNumber:'',judges:Number(c.judges)||5,preset:c.preset||'',anyoType:c.division||'',anyoStyle:c.style||'',anyoWeapon:c.weapon||'Any',ageFrom:Number(c.age_min)||0,ageTo:Number(c.age_max)||99,weightFrom:Number(c.weight_min)||0,weightTo:Number(c.weight_max)||999,weightRequired:!!c.weight_required,bracketBy:c.bracket_by||null,draw:c.rules?.draw||'random',registrationFee:Number(c.registration_fee)||0,weightRequirement:c.weight_requirement||'not_required',bracket:c.bracket||{}}));}
+  const courtNumberById=new Map((ct.data||[]).map(x=>[String(x.id),Number(x.court_number)||1]));const assignmentMap=new Map((ca.data||[]).map(x=>[String(x.category_id),courtNumberById.get(String(x.court_id))||1]));
+  settings.players=(pr.data||[]).filter(p=>!p.status||p.status==='active').map(p=>({id:p.id,name:[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' '),sex:p.gender||'',gender:p.gender||'',age:p.age,weight:p.weight,number:p.player_number||'',teamId:p.team_id||null}));
+  const byCat=new Map();
+  for(const m of (mr.data||[])){if(!byCat.has(String(m.category_id)))byCat.set(String(m.category_id),[]);byCat.get(String(m.category_id)).push(m);}
+  for(const c of (settings.categories||[])){
+    if(c.event==='Arnis Anyo')continue;
+    const rows=byCat.get(String(c.id))||[];
+    if(!rows.length)continue;
+    const rounds=[];for(const m of rows){const ri=Math.max(0,Number(m.round)-1),mi=Math.max(0,Number(m.match_number)-1);if(!rounds[ri])rounds[ri]=[];const meta=m.metadata||{};const oldMatch=(c.bracket?.rounds||[]).flat().find(x=>String(x?.id)===String(m.id));rounds[ri][mi]={id:m.id,red:m.red_player_id||null,blue:m.blue_player_id||null,redScore:Number(m.red_score)||0,blueScore:Number(m.blue_score)||0,completed:['COMPLETED','BYE'].includes(String(m.status)),winner:m.winner_player_id||null,redBye:!!meta.redBye,blueBye:!!meta.blueBye,court:m.court_id?(courtNumberById.get(String(m.court_id))||1):(assignmentMap.get(String(m.category_id))||null),history:meta.history||[],nextMatchId:meta.nextMatchId||oldMatch?.nextMatchId||null,nextSlot:meta.nextSlot||oldMatch?.nextSlot||null,firstRoundPosition:meta.firstRoundPosition??oldMatch?.firstRoundPosition};}
+    const compact=rounds.map(r=>r||[]);const b=c.bracket||{mode:'single',size:Math.pow(2,Math.max(1,compact[0]?.length||1)),players:[],byes:0,rounds:compact,locked:false};
+    b.rounds=compact;b.locked=!!c.bracket?.locked;
+    const ids=new Set();b.rounds.flat().forEach(m=>{if(m?.red)ids.add(m.red);if(m?.blue)ids.add(m.blue)});b.players=[...ids];
+    // Rebuild BYE display entries from the normalized bracket topology instead of
+    // trusting an old/stale JSON bye list. A BYE player appears in a later-round
+    // match but never appears in a Round-1 match.
+    const roundOneIds=new Set((b.rounds[0]||[]).flatMap(m=>[m?.red,m?.blue].filter(Boolean)));
+    const byeEntries=[];
+    const seenBye=new Set();
+    for(const round of b.rounds.slice(1)) for(const m of (round||[])){
+      for(const side of ['red','blue']){
+        const pid=m?.[side];
+        if(pid&&!roundOneIds.has(pid)&&!seenBye.has(pid)){
+          seenBye.add(pid);
+          byeEntries.push({playerId:pid,targetMatchId:m.id,targetSlot:side,firstRoundPosition:byeEntries.length});
+        }
+      }
+    }
+    b.byeEntries=byeEntries;
+    const final=(b.rounds[b.rounds.length-1]||[])[0];b.champion=final?.completed?final.winner:null;
+    c.bracket=b;
+  }
+  row.settings=settings;
+}
+function selectedCategory(){const settings=tournamentSettings();return (Array.isArray(settings.categories)?settings.categories:[]).find(c=>String(c.id)===String(selectedId));}
+async function clearCloudBracketMatches(categoryId){
+  if(!client||!row?.id||!categoryId)return;
+  const result=await client.from('matches').delete().eq('tournament_id',row.id).eq('category_id',categoryId);
+  if(result.error)throw result.error;
+}
+async function syncGeneratedBracketToNormalized(categoryId,b){
+  if(!client||!row?.id||!categoryId||!b?.rounds)return;
+  const rows=[];
+  b.rounds.forEach((round,ri)=>round.forEach((m,mi)=>{
+    if(!m?.id)return;
+    const bye=!!(m.redBye||m.blueBye),completed=!!m.completed;
+    rows.push({id:m.id,tournament_id:row.id,category_id:categoryId,court_id:null,round:ri+1,match_number:mi+1,bracket_position:mi,blue_player_id:m.blue||null,red_player_id:m.red||null,blue_score:Number(m.blueScore)||0,red_score:Number(m.redScore)||0,winner_player_id:m.winner||null,status:bye?'BYE':(completed?'COMPLETED':(m.red&&m.blue?'READY':'PENDING')),scheduled_at:null,started_at:null,completed_at:completed?new Date().toISOString():null,metadata:{redBye:!!m.redBye,blueBye:!!m.blueBye,history:m.history||[],nextMatchId:m.nextMatchId||null,nextSlot:m.nextSlot||null,firstRoundPosition:m.firstRoundPosition??null}});
+  }));
+  const del=await client.from('matches').delete().eq('tournament_id',row.id).eq('category_id',categoryId);if(del.error)throw del.error;
+  if(rows.length){const up=await client.from('matches').upsert(rows,{onConflict:'id'});if(up.error)throw up.error;}
+}
+function clearCategoryResults(settings,categoryId){
+  settings.results=Array.isArray(settings.results)?settings.results.filter(x=>String(x.categoryId)!==String(categoryId)):[];
+  settings.medals=Array.isArray(settings.medals)?settings.medals.filter(x=>String(x.categoryId)!==String(categoryId)):[];
+}
+function render(){
+  const settings=tournamentSettings();
+  // Show every combat bracket category from Supabase, even before a bracket has
+  // been generated. This keeps the browser bracket tab in sync with the Admin
+  // Categories page instead of hiding newly-created categories.
+  const cats=(Array.isArray(settings.categories)?settings.categories:[]).filter(c=>c&&c.event!=='Arnis Anyo');
+  const flow=String(settings.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase();
+  const orderedCats=flowSortedCategories(cats,flow);
+  const flowReady=liveOrderedReady(settings);
+  const flowNextCategory=flowReady[0]?.c?.id||orderedCats[0]?.id||'';
+  const select=$('categorySelect'); const old=selectedId||select.value||new URLSearchParams(location.search).get('category')||'';
+  if(!flowManualSelection&&!requestedCategory&&flowNextCategory)selectedId=String(flowNextCategory);
+  select.innerHTML=orderedCats.length?orderedCats.map(c=>{
+    const status=c.bracket?.locked?' • LOCKED':c.bracket?' • BRACKET READY':' • NOT GENERATED';
+    const next=String(c.id)===String(flowNextCategory)?' • NEXT':' ';
+    return `<option value="${esc(c.id)}">${esc(c.name)}${esc(status)}${esc(next)}</option>`;
+  }).join(''):'<option value="">No combat categories found</option>';
+  if(cats.some(c=>String(c.id)===String(selectedId)))select.value=selectedId; else if(cats.some(c=>String(c.id)===String(old)))select.value=old; else select.value=orderedCats[0]?.id||''; selectedId=select.value;
+  $('meta').textContent='LIVE • Match Flow: '+flow.replaceAll('_',' ')+' • Last updated '+(row?.updated_at?new Date(row.updated_at).toLocaleString():'—');
+  $('tournamentName').textContent=row?.name||settings.setup?.name||'NEW TOURNAMENT';
+  $('meta').textContent='LIVE • Last updated '+(row?.updated_at?new Date(row.updated_at).toLocaleString():'—');
+  const c=cats.find(x=>String(x.id)===String(selectedId)); const host=$('bracket');
+  if(!c){host.innerHTML='<div class="empty"><b>No combat category found.</b><br>Create a combat category in Admin → Categories.</div>';return}
+  if(!c.bracket){host.innerHTML=`<div class="empty"><b>${esc(c.name)}</b><br>No bracket has been generated yet.<br><small>This bracket has not been generated yet. An administrator must generate it from Admin → Brackets.</small></div>`;return}
+  const b=c.bracket;
+  if(!Array.isArray(b.rounds)){host.innerHTML='<div class="empty">This category has an invalid bracket structure.</div>';return}
+  const pm=playerMap(settings),tm=teamMap(settings);host.innerHTML='';
+  b.rounds.forEach((r,ri)=>{const col=document.createElement('section');col.className='round';col.innerHTML=`<h3>${esc(b.mode==='roundrobin'?'ROUND '+(ri+1):roundName(ri,b.rounds.length))}</h3><div class="matches"></div>`;const list=col.querySelector('.matches');
+    if(ri===0&&b.mode==='single'){
+      const entries=[];(r||[]).forEach(m=>entries.push({pos:Number.isFinite(m.firstRoundPosition)?m.firstRoundPosition:999,type:'match',m}));(b.byeEntries||[]).forEach(x=>entries.push({pos:x.firstRoundPosition,type:'bye',x}));entries.sort((a,z)=>a.pos-z.pos||({bye:0,match:1}[a.type]-({bye:0,match:1}[z.type])));
+      entries.forEach(e=>{if(e.type==='match'){const mi=r.indexOf(e.m),wrap=document.createElement('div');wrap.innerHTML=matchHtml(e.m,ri,mi,pm,tm,b);list.appendChild(wrap.firstElementChild)}else{const wrap=document.createElement('div');wrap.className='bye-entry';wrap.dataset.targetMatch=e.x.targetMatchId||'';wrap.innerHTML=`<span class="bye-tag">BYE</span><b>${esc(nameFor(e.x.playerId,pm))}</b><small>ADVANCES</small>`;list.appendChild(wrap)}});
+    }else{
+      r.forEach((m,mi)=>{const wrap=document.createElement('div');wrap.innerHTML=matchHtml(m,ri,mi,pm,tm,b);list.appendChild(wrap.firstElementChild)});
+    }
+    if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='No active matches';list.appendChild(e)}
+    host.appendChild(col);
+  });
+  const next=flowReady.find(x=>String(x.c.id)===String(c.id));if(next){const el=host.querySelector(`.match[data-ri=\"${next.ri}\"][data-mi=\"${next.mi}\"]`);if(el)el.classList.add('flow-next');}
+  if(b.champion){const x=document.createElement('div');x.className='champion';x.innerHTML='<small>TOURNAMENT CHAMPION</small><b>🏆 '+esc(nameFor(b.champion,pm))+'</b>';host.appendChild(x)}
+  host.style.setProperty('--round-count',String(b.rounds.length));
+  $('printTournament').textContent=$('tournamentName').textContent||'NEW TOURNAMENT';
+  $('printCategory').textContent=c.name||'';
+  wireMatchClicks();
+  requestAnimationFrame(drawTree);
+}
+async function init(){
+  if(!cfg.url||!cfg.anonKey){setStatus(false,'NOT CONFIGURED');setNotice('Tournament service configuration is missing.','error');return}
+  try{const sel=$('categorySelect');if(sel&&!sel.dataset.flowBound){sel.dataset.flowBound='1';sel.addEventListener('change',()=>{flowManualSelection=true;selectedId=sel.value;render()})}const mod=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');client=mod.createClient(cfg.url,cfg.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});setStatus(true,'CONNECTED');await load();startRealtime();clearInterval(timer);timer=setInterval(load,2000)}catch(e){console.error(e);setStatus(false,'CONNECTION ERROR');setNotice('Unable to connect to the tournament service: '+(e.message||e),'error')}
+}
+async function load(){
+  try{
+    let q=client.from('tournaments').select('id,name,venue,event_date,organizer,status,settings,updated_at');
+    if(requestedId) q=q.eq('id',requestedId).limit(1); else q=q.order('updated_at',{ascending:false}).limit(1);
+    const r=await q; if(r.error)throw r.error;
+    const next=r.data?.[0];
+    if(!next){setStatus(false,'NO TOURNAMENT');setNotice(requestedId?'The requested tournament was not found or is not accessible to this account.':'No tournament is currently available to this account.','error');return}
+    row=next;await hydrateNormalizedBracket();setStatus(true,'LIVE');setNotice('Live bracket loaded from the official tournament data. Changes will appear automatically.','ok');render();
+  }catch(e){console.error(e);setStatus(false,'READ ERROR');setNotice('Unable to load the live bracket: '+(e.message||e),'error')}
+}
+function startRealtime(){if(!client||channel)return;channel=client.channel('radium-bracket-display').on('postgres_changes',{event:'*',schema:'public',table:'tournaments'},()=>load()).on('postgres_changes',{event:'*',schema:'public',table:'matches'},payload=>{if(!row?.id||payload.new?.tournament_id===row.id||payload.old?.tournament_id===row.id)load()}).subscribe()}
+$('categorySelect').addEventListener('change',()=>{selectedId=$('categorySelect').value;render()});$('refreshBtn').onclick=load;$('printBtn').onclick=()=>{preparePrint();window.print()};
+function preparePrint(){const h=$('printHeader');if(h){h.style.display='flex';h.style.alignItems='center';h.style.gap='4mm';h.style.marginBottom='3mm';h.querySelector('img').style.width='15mm';h.querySelector('img').style.height='15mm';h.querySelector('img').style.objectFit='contain';h.querySelector('strong').style.display='block';h.querySelector('strong').style.fontSize='13pt';h.querySelector('span').style.display='block';h.querySelector('span').style.fontSize='9pt';}setTimeout(()=>{$('printHeader').style.display='none'},1500)}
+window.addEventListener('resize',()=>requestAnimationFrame(drawTree));
+/* V33: Live Bracket is read-only. Scoreboards write authoritative results directly. */
+if(['TABLE_OFFICIAL','ACCOUNTANT'].includes(requestedRole)){const ab=$('adminBtn');if(ab)ab.style.display='none';}
+$('adminBtn').onclick=()=>{if(requestedRole==='TABLE_OFFICIAL'||requestedRole==='ACCOUNTANT')return;const id=row?.id;const u=id?'index.html?open=bracket&tournament='+encodeURIComponent(id):'index.html';window.open(u,'RADIUM_ADMIN')};
+window.addEventListener('beforeunload',()=>{try{clearInterval(timer);if(channel)client.removeChannel(channel)}catch(e){}});
+init();
+})();
+</script>
+</body>
+</html>

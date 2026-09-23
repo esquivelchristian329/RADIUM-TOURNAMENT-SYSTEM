@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head><script src="../db/supabase-config.js"></script><script src="../js/supabase-db.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#07142d">
+<title>RADIUM Anyo Scoreboard</title>
+
+  <link rel="stylesheet" href="scoreboard.css">
+
+<style id="RADIUM_LOCAL_STYLE_FALLBACK">
+
+:root{
+  --bg:#050b18;--panel:#07162f;--panel2:#0a1d40;--blue:#174bd1;--blue2:#2468ff;
+  --gold:#ffc400;--white:#f7fbff;--muted:#aebbd0;--line:#4d6a9d;--green:#20b45e;--red:#df303c;
+}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:var(--bg);color:var(--white);font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+button,input{font:inherit}
+button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.screen{width:100vw;height:100vh;min-height:560px;padding:10px;display:flex;flex-direction:column;gap:9px;background:radial-gradient(circle at 50% 0%,#102a61 0,#07142d 38%,#030815 100%)}
+.header{height:74px;flex:0 0 74px;display:grid;grid-template-columns:60px 60px 1fr 60px 60px;align-items:center;border:1px solid var(--line);background:#061126;box-shadow:0 0 20px #0008}
+.logo{width:58px;height:58px;object-fit:contain;justify-self:center}.scoreboard-logo{display:none}
+.brand{text-align:center;line-height:1}
+.brand h1{margin:0;font-size:clamp(22px,3vw,42px);font-weight:900;letter-spacing:3px;text-transform:uppercase}
+.brand .sub{margin-top:6px;color:var(--gold);font-size:clamp(11px,1.25vw,18px);font-weight:900;letter-spacing:1px;text-transform:uppercase}
+.eventbar{height:52px;flex:0 0 52px;display:grid;grid-template-columns:145px 1fr;border:1px solid var(--line);background:var(--panel2)}
+.eventnum{display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid var(--line);background:#071a44}
+.eventnum small{font-size:11px;font-weight:900;color:#dbe6ff}.eventnum strong{font-size:24px;color:var(--gold)}
+.category{display:flex;align-items:center;justify-content:center;padding:0 14px;font-size:clamp(18px,2.3vw,32px);font-weight:900;letter-spacing:1px;text-transform:uppercase;text-align:center}
+.top{display:grid;grid-template-columns:22% 1fr 25%;gap:8px;min-height:150px;flex:1 1 0}
+.box{border:1px solid var(--line);background:linear-gradient(180deg,#081a39,#040d20);min-width:0}
+.box-title{height:32px;display:flex;align-items:center;justify-content:center;background:linear-gradient(90deg,#0d369d,#174bd1,#0d369d);font-size:clamp(13px,1.3vw,20px);font-weight:900;letter-spacing:.5px;border-bottom:1px solid var(--line)}
+.deduction{display:flex;flex-direction:column}.deduction-main{flex:1;display:flex;align-items:center;justify-content:center;font-size:clamp(55px,7vw,110px);font-weight:900}.deduction-grid{height:43px;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.deduction-grid div{display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line);color:var(--gold);font-weight:900;font-size:clamp(14px,1.5vw,22px)}.deduction-grid div:last-child{border-right:0}
+.deduction-controls{padding:5px 8px;display:grid;gap:3px;overflow:auto}.deduct-row{display:grid;grid-template-columns:minmax(0,1fr) 28px 34px 28px 52px;align-items:center;gap:3px;font-size:clamp(9px,0.8vw,13px);font-weight:800}.deduct-row span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.deduct-row button{border:1px solid #55719e;background:#142c55;color:#fff;border-radius:4px;height:24px;font-weight:900;line-height:1}.deduct-row b{text-align:center;color:var(--gold)}.deduct-row output{text-align:right;color:#ff9f9f;font-variant-numeric:tabular-nums}.deduction-settings{display:grid;grid-template-columns:repeat(4,1fr);gap:3px;padding:4px 7px;border-top:1px solid var(--line);background:#06132a}.deduction-settings label{font-size:8px;color:var(--muted);font-weight:900;text-align:center}.deduction-settings input{width:100%;min-width:0;background:#071735;color:#fff;border:1px solid #35547f;border-radius:3px;text-align:center;font-size:11px;padding:2px}
+
+.finalbox{display:flex;flex-direction:column}.final-score{flex:1;display:flex;align-items:center;justify-content:center;color:var(--gold);font-size:clamp(75px,10vw,170px);font-weight:900;line-height:1;text-shadow:0 2px 0 #0008}.range{text-align:center;font-size:12px;color:var(--muted);padding-bottom:8px;font-weight:700}
+.timerbox{display:flex;flex-direction:column}.timer{flex:1;display:flex;align-items:center;justify-content:center;font-size:clamp(38px,5vw,86px);font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:1px;white-space:nowrap;line-height:1}.timer #timerMs{font-size:.32em;margin-left:.04em;opacity:.9}.timer.running{color:var(--gold)}.timer-status{display:flex;align-items:center;justify-content:center;gap:8px;min-height:22px;font-weight:900;font-size:clamp(11px,1.1vw,16px);letter-spacing:.5px}.timer-status .live-dot{width:10px;height:10px;border-radius:50%;background:#e33;box-shadow:0 0 0 4px rgba(255,70,70,.16);display:none}.timerbox.running .live-dot{display:inline-block}.timerbox.running .timer-status{color:#ff6969}.timer-hidden{visibility:hidden}
+.timer-controls{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:6px}.timer-controls button{border:0;min-height:42px;border-radius:5px;color:#fff;font-weight:900;font-size:clamp(12px,1.2vw,18px)}.start{background:var(--green)}.stop{background:var(--red)}.timer-reset{background:#2458b9}
+.judges{height:145px;flex:0 0 145px;display:grid;grid-template-columns:repeat(5,1fr);border:1px solid var(--line);background:#050f24}.judge{border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}.judge:last-child{border-right:0}.judge-head{height:36px;display:flex;align-items:center;justify-content:center;background:linear-gradient(90deg,#0c369d,#174bd1,#0c369d);font-size:clamp(12px,1.25vw,18px);font-weight:900}.judge-score{flex:1;display:flex;align-items:center;justify-content:center;padding:5px}.judge-score input{width:100%;height:100%;border:0;outline:0;background:#071735;color:var(--gold);text-align:center;font-size:clamp(38px,4.7vw,78px);font-weight:900;min-width:0}.judge-score input:focus{box-shadow:inset 0 0 0 3px var(--blue2)}
+.bottom-info{height:65px;flex:0 0 65px;display:grid;grid-template-columns:18% 1fr 18%;border:1px solid var(--line);background:#06132a}.info-cell{display:flex;flex-direction:column;align-items:center;justify-content:center;border-right:1px solid var(--line)}.info-cell:last-child{border-right:0}.info-label{font-size:11px;color:var(--muted);font-weight:900;text-transform:uppercase}.info-value{font-size:clamp(15px,1.6vw,25px);font-weight:900;color:var(--gold);margin-top:2px}.name-hidden{font-size:12px;color:var(--muted);font-weight:700;text-align:center}.name-hidden strong{display:block;color:#fff;font-size:clamp(14px,1.5vw,22px);letter-spacing:2px}
+.actions button:disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.35)}.next{background:linear-gradient(135deg,#0b68e8,#0a4ec4);color:#fff}.actions{height:58px;flex:0 0 58px;display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.actions button{border:1px solid #7890b8;border-radius:7px;color:#fff;font-weight:900;font-size:clamp(11px,1.1vw,18px);background:#17243a;box-shadow:0 3px 0 #0005;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.actions .clear{background:#263449}.actions .change{background:#7022b9}.actions .save{background:#0f68dd}.actions .rank{background:#1557c9}
+.footer{height:23px;flex:0 0 23px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;color:var(--muted);font-size:11px;font-weight:700}.footer .ok{color:var(--gold)}
+.overlay{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;z-index:20;padding:20px}.dialog{width:min(520px,94vw);background:#091a38;border:2px solid var(--blue2);border-radius:12px;padding:20px;box-shadow:0 20px 60px #000}.dialog h2{margin:0 0 10px;text-align:center;color:var(--gold)}.dialog p{color:var(--muted);text-align:center}.dialog-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:15px}.dialog button{min-height:52px;border:0;border-radius:8px;font-weight:900;color:#fff}.dialog .yes{background:var(--green)}.dialog .no{background:#33445e}
+/* Laptop-first sizing: optimized for 1280x720, 1366x768 and 1440x900 */
+@media (min-width: 901px) and (max-width: 1600px){
+  .screen{padding:8px;gap:7px}
+  .header{height:62px;flex-basis:62px;grid-template-columns:52px 52px 1fr 52px 52px}
+  .logo{width:48px;height:48px}
+  .brand h1{font-size:clamp(20px,2.4vw,32px)}
+  .brand .sub{font-size:clamp(10px,1vw,14px)}
+  .eventbar{height:48px;flex-basis:48px}
+  .category{font-size:clamp(16px,1.7vw,25px)}
+  .top{min-height:0}
+  .final-score{font-size:clamp(70px,8.5vw,130px)}
+  .deduction-main{font-size:clamp(48px,5.8vw,82px)}
+  .timer{font-size:clamp(44px,4.6vw,72px)}
+  .timer #timerMs{font-size:.30em}
+  .timer-controls button{min-height:36px;font-size:14px}
+  .box-title{height:28px;font-size:14px}
+  .deduct-row{font-size:11px;grid-template-columns:minmax(0,1fr) 28px 30px 28px 48px}
+  .deduct-row button{height:22px}
+  .deduction-settings input{font-size:10px}
+  .judge-head{height:32px;font-size:14px}
+  .judge-score input{font-size:clamp(34px,3.7vw,58px)}
+  .bottom-info{height:54px;flex-basis:54px}
+  .info-label{font-size:10px}
+  .info-value{font-size:clamp(14px,1.3vw,20px)}
+  .actions button{font-size:14px;min-height:38px}
+  .footer{font-size:10px}
+}
+
+@media(max-width:900px){html,body{overflow:auto}.screen{height:auto;min-height:100vh}.top{grid-template-columns:1fr 1fr;flex:none;height:230px}.finalbox{grid-column:1/-1;grid-row:1}.deduction{grid-column:1}.timerbox{grid-column:2}.judges{height:128px;flex-basis:128px}.header{grid-template-columns:45px 45px 1fr 45px 45px}.logo{width:45px;height:45px}.bottom-info{height:58px;flex-basis:58px}.actions button:disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.35)}.next{background:linear-gradient(135deg,#0b68e8,#0a4ec4);color:#fff}.actions{height:auto;min-height:54px;grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.screen{padding:6px;gap:6px}.header{height:62px;flex-basis:62px;grid-template-columns:38px 38px 1fr 38px 38px}.brand h1{font-size:18px;letter-spacing:1px}.brand .sub{font-size:9px}.eventbar{height:44px;flex-basis:44px;grid-template-columns:85px 1fr}.eventnum strong{font-size:19px}.category{font-size:15px}.top{display:grid;grid-template-columns:1fr 1fr;height:220px}.finalbox{grid-column:1/-1;grid-row:1;height:108px}.final-score{font-size:64px}.deduction,.timerbox{height:170px}.timerbox{height:105px}.box-title{height:26px;font-size:11px}.deduction-main{font-size:38px;flex:0 0 42px}.deduction-controls{padding:3px 4px;gap:2px}.deduct-row{grid-template-columns:minmax(0,1fr) 22px 26px 22px 42px;font-size:8px}.deduct-row button{height:20px}.deduction-settings{padding:3px 4px}.deduction-settings label{font-size:7px}.deduction-settings input{font-size:9px}.deduction-grid{display:none}.timer{font-size:32px}.timer-controls{padding:3px;gap:3px}.timer-controls button{min-height:30px;font-size:10px}.judges{height:auto;display:grid;grid-template-columns:repeat(5,1fr);flex-basis:auto}.judge-head{height:27px;font-size:9px}.judge-score{height:72px}.judge-score input{font-size:28px}.bottom-info{grid-template-columns:20% 1fr 20%;height:52px;flex-basis:52px}.info-label{font-size:8px}.info-value{font-size:15px}.name-hidden strong{font-size:11px}.name-hidden{font-size:8px}.actions button:disabled{opacity:.45;cursor:not-allowed;filter:grayscale(.35)}.next{background:linear-gradient(135deg,#0b68e8,#0a4ec4);color:#fff}.actions{grid-template-columns:repeat(2,1fr);gap:5px}.actions button{min-height:46px;font-size:12px}.footer{font-size:8px;padding:0 5px}}
+.timer{font-variant-numeric:tabular-nums;letter-spacing:0!important}
+
+</style>
+</head>
+<body>
+<div class="screen">
+  <header class="header"><img class="logo scoreboard-logo" id="logo1" alt=""><img class="logo scoreboard-logo" id="logo2" alt=""><div class="brand"><h1 id="tournamentTitle">RADIUM TOURNAMENT</h1><div class="sub">ANYO SCOREBOARD</div></div><img class="logo scoreboard-logo" id="logo3" alt=""><img class="logo scoreboard-logo" id="logo4" alt=""></header>
+
+  <section class="eventbar">
+    <div class="eventnum"><small>EVENT #</small><strong id="eventNumber">--</strong></div>
+    <div class="category" id="category">SELECT ANYO CATEGORY<div class="sub-category" id="subCategory"></div></div>
+  </section>
+
+  <section class="top">
+    <div class="box deduction official-deductions">
+      <div class="box-title">TABLE OFFICIAL • DEDUCTIONS</div>
+      <div class="deduction-main" id="deduction">0.00</div>
+      <div class="deduction-controls">
+        <div class="deduct-row"><span title="Time Violation">TV</span><button type="button" data-deduct="tv" data-dir="-1">−</button><b id="tv">0</b><button type="button" data-deduct="tv" data-dir="1">+</button><output id="tvAmt">−0.00</output></div>
+        <div class="deduct-row"><span title="Disarm Violation">DV</span><button type="button" data-deduct="dv" data-dir="-1">−</button><b id="dv">0</b><button type="button" data-deduct="dv" data-dir="1">+</button><output id="dvAmt">−0.00</output></div>
+        <div class="deduct-row"><span title="Out of Mat / Line Violation">LV</span><button type="button" data-deduct="lv" data-dir="-1">−</button><b id="lv">0</b><button type="button" data-deduct="lv" data-dir="1">+</button><output id="lvAmt">−0.00</output></div>
+        <div class="deduct-row"><span title="Other Violation">OV</span><button type="button" data-deduct="fp" data-dir="-1">−</button><b id="fp">0</b><button type="button" data-deduct="fp" data-dir="1">+</button><output id="fpAmt">−0.00</output></div>
+      </div>
+      <div class="deduction-settings"><label>TV <input id="tvRate" type="number" min="0" max="10" step="0.01" value="0.50"></label><label>DV <input id="dvRate" type="number" min="0" max="10" step="0.01" value="0.50"></label><label>MAT <input id="lvRate" type="number" min="0" max="10" step="0.01" value="0.50"></label><label>OTHER <input id="fpRate" type="number" min="0" max="10" step="0.01" value="0.50"></label></div>
+    </div>
+
+    <div class="box finalbox">
+      <div class="box-title">FINAL SCORE</div>
+      <div class="final-score" id="finalScore">0.00</div>
+      <div class="range">SCORE RANGE: 7.50 – 10.00</div>
+    </div>
+
+    <div class="box timerbox">
+      <div class="box-title">STOPWATCH</div>
+      <div class="timer" id="timer"><span id="timerMain">READY</span><span id="timerMs"></span></div><div class="timer-status" id="timerStatus"><span class="live-dot"></span><span id="timerStatusText">READY — PRESS START</span></div>
+      <div class="timer-controls">
+        <button class="start" id="startBtn">START ▶</button>
+        <button class="stop" id="stopBtn">STOP ■</button>
+        <button class="timer-reset" id="timerResetBtn">RESET ↻</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="judges" id="judgeBoard"></section>
+
+  <section class="bottom-info">
+    <div class="info-cell"><div class="info-label">PERFORMER #</div><div class="info-value" id="performerNumber">--</div></div>
+    <div class="info-cell"><div class="info-label">PERFORMER</div><div class="name-hidden"><strong id="performerName">--</strong></div></div>
+    <div class="info-cell"><div class="info-label">DIVISION</div><div class="info-value" id="division">--</div></div>
+  </section>
+
+  <section class="actions">
+    <button class="clear" id="clearBtn">CLEAR</button>
+    <button class="change" id="changeBtn">CHANGE CAT.</button>
+    <button class="save" id="saveBtn" disabled>SAVE</button>
+    <button class="next" id="nextBtn" disabled>NEXT PERFORMER ▶</button>
+    <button class="fullscreen" id="fullscreenBtn">FULL SCREEN ⛶</button>
+    <button class="rank" id="rankBtn">RANKING</button>
+  </section>
+
+  <footer class="footer"><span>Judges: <span class="ok" id="judgeFooter">5</span></span><span id="ruleFooter">Highest &amp; lowest score will be removed.</span><span id="clock">System Time: --:--:--</span></footer>
+</div>
+
+<div class="overlay" id="saveOverlay"><div class="dialog"><h2>RESULT READY</h2><p id="saveMessage">Save this Anyo performance result?</p><div class="dialog-actions"><button class="no" id="cancelSave">CANCEL</button><button class="yes" id="confirmSave">SAVE RESULT</button></div></div></div>
+
+<script>
+'use strict';
+const qs=new URLSearchParams(location.search);
+const court=qs.get('court')||'anyo';
+const categoryId=qs.get('categoryId')||'';
+const categoryName=qs.get('category')||'SELECT ANYO CATEGORY';
+async function loadTournamentTitle(){const tid=qs.get('tournament')||'';if(!tid||!window.RADIUM_DB)return;try{await window.RADIUM_DB.init();const r=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:tid},limit:1});const row=r.data?.[0]||{};const el=document.getElementById('tournamentTitle');if(el)el.textContent=row.name||'RADIUM TOURNAMENT';const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:tid},limit:20});(lr.data||[]).forEach(x=>{const u=window.RADIUM_DB.state?.client?.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const img=document.getElementById('logo'+(i+1));if(img){const src=logos[i]||'';img.src=src;img.style.display=src?'block':'none';img.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
+const division=qs.get('division')||qs.get('sex')||'Individual';
+const style=qs.get('style')||qs.get('level')||'Traditional';
+const weapon=qs.get('weapon')||'Any';
+let count=Math.min(5,Math.max(3,Number(qs.get('judges'))||5));
+let performerIndex=Math.max(0,Number(qs.get('performerIndex'))||0);
+let currentId=qs.get('competitorId')||'';
+let currentType=qs.get('competitorType')||'player';
+let entryList=[];
+try{entryList=JSON.parse(decodeURIComponent(qs.get('entries')||'[]'))||[]}catch(e){entryList=[]}
+let officialDepEd=false;
+let scoreboardRole='';
+const NEXT_ROLES=new Set(['ADMIN','TOURNAMENT_MANAGER','TABLE_OFFICIAL']);
+async function loadScoreboardRole(){
+  try{
+    if(!window.RADIUM_DB)return '';
+    await window.RADIUM_DB.init();
+    const session=await window.RADIUM_DB.session();
+    const uid=session?.data?.session?.user?.id;
+    if(!uid)return '';
+    const r=await window.RADIUM_DB.select('profiles',{select:'role',eq:{id:uid},limit:1});
+    scoreboardRole=String(r.data?.[0]?.role||'').toUpperCase();
+  }catch(e){console.warn('Scoreboard role load:',e);scoreboardRole='';}
+  return scoreboardRole;
+}
+async function loadOfficialEntries(){
+  const tid=qs.get('tournament')||'', cid=qs.get('categoryId')||'';
+  if(!tid||!cid||!window.RADIUM_DB)throw new Error('Tournament or Anyo category ID is missing.');
+  await window.RADIUM_DB.init();
+  const [tr,cr,er,mr,pr]=await Promise.all([
+    window.RADIUM_DB.select('tournaments',{select:'id,settings',eq:{id:tid},limit:1}),
+    window.RADIUM_DB.select('categories',{select:'id,name,event_type,judges',eq:{id:cid},limit:1}),
+    window.RADIUM_DB.select('anyo_entries',{select:'id,category_id,entry_type,entry_number,style,weapon,draw_order,status',eq:{tournament_id:tid,category_id:cid,status:'active'},order:{column:'entry_number',ascending:true}}),
+    window.RADIUM_DB.select('anyo_entry_members',{select:'entry_id,player_id,member_position',eq:{tournament_id:tid}}),
+    window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,nickname,team_id',eq:{tournament_id:tid}})
+  ]);
+  for(const r of [tr,cr,er,mr,pr])if(r.error)throw r.error;
+  const tournament=tr.data?.[0], category=cr.data?.[0];
+  if(!category||category.event_type!=='Anyo')throw new Error('Selected category is not an Anyo category.');
+  officialDepEd=String(tournament?.settings?.setup?.competitionProgram||'').toUpperCase()==='DEPED_PEKAF';
+  const membersByEntry=new Map();(mr.data||[]).forEach(m=>{if(!membersByEntry.has(m.entry_id))membersByEntry.set(m.entry_id,[]);membersByEntry.get(m.entry_id).push(m)});
+  const players=new Map((pr.data||[]).map(x=>[String(x.id),x]));
+  const playerName=(p)=>p?(p.nickname||[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ').replace(/\s+/g,' ').trim()||p.id):'';
+  const passed=new Map(entryList.map((x,i)=>[String(x.id),i]));
+  entryList=(er.data||[]).map(e=>{
+    const ms=(membersByEntry.get(e.id)||[]).sort((a,b)=>Number(a.member_position)-Number(b.member_position));
+    const names=ms.map(m=>playerName(players.get(String(m.player_id)))).filter(Boolean);
+    return {id:e.id,name:names.join(' / ')||e.entry_number||e.id,number:e.entry_number||e.id,drawOrder:Number.isInteger(Number(e.draw_order))?Number(e.draw_order):null,style:e.style||'',weapon:e.weapon||'',teamId:players.get(String(ms[0]?.player_id))?.team_id||'',memberIds:ms.map(m=>m.player_id),passedIndex:passed.get(String(e.id))};
+  });
+  if(officialDepEd){
+    const drawn=entryList.every(e=>Number.isInteger(e.drawOrder)&&e.drawOrder>0);
+    if(drawn)entryList.sort((a,b)=>a.drawOrder-b.drawOrder||String(a.number).localeCompare(String(b.number)));
+    else entryList.sort((a,b)=>{const ad=a.drawOrder,bd=b.drawOrder;if(Number.isInteger(ad)&&!Number.isInteger(bd))return -1;if(!Number.isInteger(ad)&&Number.isInteger(bd))return 1;return String(a.number).localeCompare(String(b.number));});
+  }else{
+    entryList.sort((a,b)=>{const ai=Number.isInteger(a.passedIndex)?a.passedIndex:999999;const bi=Number.isInteger(b.passedIndex)?b.passedIndex:999999;return ai-bi||String(a.number).localeCompare(String(b.number));});
+  }
+  performerIndex=entryList.length?Math.min(Math.max(0,performerIndex),entryList.length-1):0;
+  currentId=entryList[performerIndex]?.id||'';
+  count=Math.min(5,Math.max(3,Number(category.judges)||Number(qs.get('judges'))||5));
+}
+let scores=[null,null,null,null,null];
+const deductions={tv:0,dv:0,lv:0,fp:0};
+const deductionRates={tv:0.50,dv:0.50,lv:0.50,fp:0.50};
+let elapsedMs=0,running=false,startedAt=0,startedAtIso=null,finishedAtIso=null,timerHandle=null,savedCurrent=false;
+function categoryText(){return categoryName}
+function eventText(){return qs.get('event')||qs.get('eventNumber')||'--'}
+function divisionText(){return division}
+function performerText(){return String(performerIndex+1)}
+function calc(){
+  const vals=scores.slice(0,count);if(vals.some(v=>!Number.isFinite(v)))return null;
+  let kept=vals.slice(),dropped=[];
+  if(count===5){const sorted=vals.map((v,i)=>({v,i})).sort((a,b)=>a.v-b.v);const low=sorted.shift(),high=sorted.pop();dropped=[low.v,high.v];kept=sorted.map(x=>x.v)}
+  const avg=kept.reduce((a,b)=>a+b,0)/kept.length;
+  return {rawTotal:vals.reduce((a,b)=>a+b,0),keptTotal:kept.reduce((a,b)=>a+b,0),average:avg,dropped,scores:vals.slice()};
+}
+function render(){
+  document.getElementById('category').childNodes[0].textContent=categoryText();
+  document.getElementById('subCategory').textContent=(style+' • '+division+' • '+weapon).toUpperCase();
+  document.getElementById('eventNumber').textContent=eventText();
+  document.getElementById('division').textContent=divisionText().toUpperCase();
+  document.getElementById('performerNumber').textContent=entryList.length?performerText():'--';
+  const b=document.getElementById('judgeBoard');
+  b.innerHTML=Array.from({length:5},(_,i)=>`<div class="judge" style="display:${i<count?'flex':'none'}"><div class="judge-head">JUDGE ${i+1}</div><div class="judge-score"><input data-score="${i}" type="number" inputmode="decimal" min="7.5" max="10" step="0.1" value="${scores[i]??''}" aria-label="Judge ${i+1} score"></div></div>`).join('');
+  b.querySelectorAll('[data-score]').forEach(x=>x.addEventListener('input',()=>{const raw=x.value.trim();const v=Number(raw);scores[Number(x.dataset.score)]=raw===''?null:(Number.isFinite(v)?Math.max(7.5,Math.min(10,Math.round(v*10)/10)):null);savedCurrent=false;document.getElementById('saveBtn').disabled=false;document.getElementById('nextBtn').disabled=true;update()}));
+  document.getElementById('judgeFooter').textContent=count;
+  document.getElementById('ruleFooter').textContent=count===5?'Highest & lowest score will be removed.':`All ${count} judges' scores will be averaged.`;
+  update();updateNextButton();
+}
+function totalDeduction(){return Object.keys(deductions).reduce((sum,k)=>sum+(Number(deductions[k])||0)*(Number(deductionRates[k])||0),0)}
+function finalScoreValue(){const c=calc();return c?Math.max(0,c.average-totalDeduction()):null}
+function update(){
+  const c=calc(), total=totalDeduction(), final=finalScoreValue();
+  document.getElementById('finalScore').textContent=final!=null?final.toFixed(2):'0.00';
+  document.getElementById('deduction').textContent=total.toFixed(2);
+  Object.keys(deductions).forEach(k=>{document.getElementById(k).textContent=deductions[k];document.getElementById(k+'Amt').textContent='−'+(deductions[k]*deductionRates[k]).toFixed(2)});
+  document.getElementById('finalScore').style.color=final!=null?'var(--gold)':'var(--white)';
+}
+function formatTime(ms){ms=Math.max(0,Math.round(ms));const total=Math.floor(ms/1000),h=Math.floor(total/3600),m=Math.floor((total%3600)/60),s=total%60,mm=ms%1000;return[h,m,s].map(v=>String(v).padStart(2,'0')).join(':')+'.'+String(mm).padStart(3,'0')}
+function currentElapsed(){return running?elapsedMs+(performance.now()-startedAt):elapsedMs}
+function renderTimer(){const formatted=formatTime(currentElapsed()),parts=formatted.split('.');const main=document.getElementById('timerMain'),ms=document.getElementById('timerMs'),box=document.querySelector('.timerbox'),status=document.getElementById('timerStatusText');if(running){if(main)main.textContent='TIME RUNNING';if(ms)ms.textContent='';if(status)status.textContent='PERFORMANCE IN PROGRESS';}else if(elapsedMs>0){if(main)main.textContent=parts[0];if(ms)ms.textContent='.'+(parts[1]||'000');if(status)status.textContent='PERFORMANCE ENDED • TIME REVEALED';}else{if(main)main.textContent='READY';if(ms)ms.textContent='';if(status)status.textContent='READY — PRESS START';}if(box)box.classList.toggle('running',running);document.getElementById('timer').classList.toggle('running',running)}
+function startTimer(){if(running)return;if(elapsedMs>0)return alert('Reset the stopwatch before starting a new performance.');startedAt=performance.now();startedAtIso=new Date().toISOString();finishedAtIso=null;running=true;document.getElementById('saveBtn').disabled=true;timerHandle=setInterval(renderTimer,50);renderTimer()}
+function stopTimer(){if(!running)return;elapsedMs+=performance.now()-startedAt;running=false;finishedAtIso=new Date().toISOString();clearInterval(timerHandle);timerHandle=null;document.getElementById('saveBtn').disabled=false;renderTimer()}
+function resetTimer(){if(running){running=false;clearInterval(timerHandle);timerHandle=null;}elapsedMs=0;startedAt=0;startedAtIso=null;finishedAtIso=null;document.getElementById('saveBtn').disabled=true;renderTimer()}
+function updateNextButton(){const b=document.getElementById('nextBtn');if(!b)return;const hasNext=performerIndex+1<entryList.length;const authorized=NEXT_ROLES.has(scoreboardRole);b.disabled=!authorized||!savedCurrent||!hasNext;b.textContent=hasNext?'NEXT PERFORMER ▶':'COMPLETE';b.title=authorized?'Advance to the next saved performer':'Admin, Tournament Manager, or Table Official account required';}
+async function emit(payload){
+  if(!window.RADIUM_DB)throw new Error('Tournament service is unavailable.');
+  await window.RADIUM_DB.init();
+  const tid=qs.get('tournament')||'';if(!tid)throw new Error('Tournament ID is missing.');
+  payload.entryId=payload.entryId||payload.competitorId;
+  const r=await window.RADIUM_DB.rpc('radium_save_anyo_performance',{p_tournament_id:tid,p_payload:payload});
+  if(r.error)throw r.error;
+  const row=Array.isArray(r.data)?r.data[0]:r.data;if(row?.id)payload.id=row.id;
+  try{if(window.opener&&!window.opener.closed)window.opener.postMessage({type:'RADIUM_ANYO_SCORE',payload},'*')}catch(e){}
+  try{const bc=new BroadcastChannel('RADIUM_ANYO_SCORE');bc.postMessage(payload);bc.close()}catch(e){}
+  return payload;
+}
+function buildPayload(){const c=calc();if(!c)return null;const final=finalScoreValue();return{time:new Date().toISOString(),court,categoryId,categoryName,competitorId:currentId,entryId:currentId,competitorType:'entry',judgeCount:count,scores:c.scores,rawTotal:c.rawTotal,dropped:c.dropped,keptTotal:c.keptTotal,average:c.average,judgeAverage:c.average,deductions:{...deductions},deductionRates:{...deductionRates},totalDeduction:totalDeduction(),finalScore:final,elapsedMs:Math.round(currentElapsed()),elapsedTime:formatTime(currentElapsed()),startedAt:startedAtIso,finishedAt:finishedAtIso||new Date().toISOString(),performerIndex,finished:true}}
+function openSave(){if(running){alert('Press STOP to end the performance before saving. The final time will then be revealed.');return}if(elapsedMs<=0){alert('Start and stop the performance timer before saving.');return}const c=calc();if(!c){alert('Enter all active judge scores from 7.5 to 10.0.');return}document.getElementById('saveMessage').textContent=`Judge average ${c.average.toFixed(2)} • Deduction −${totalDeduction().toFixed(2)} • Final ${finalScoreValue().toFixed(2)} • Time ${formatTime(currentElapsed())}. Save this Anyo performance?`;document.getElementById('saveOverlay').style.display='flex'}
+function closeSave(){document.getElementById('saveOverlay').style.display='none'}
+let anyoSaving=false;
+async function confirmSave(){if(anyoSaving)return;const payload=buildPayload();if(!payload)return;anyoSaving=true;document.getElementById('confirmSave').disabled=true;stopTimer();try{await emit(payload);savedCurrent=true;document.getElementById('saveBtn').disabled=true;updateNextButton();closeSave();alert('Performance finished and saved successfully.')}catch(e){console.error('Anyo Supabase save failed:',e);alert('Result was NOT saved. Please check the connection: '+(e.message||e));}finally{anyoSaving=false;document.getElementById('confirmSave').disabled=false;}} 
+function loadPerformer(index){if(index<0||index>=entryList.length)return;const e=entryList[index];if(!e)return;performerIndex=index;currentId=e.id;currentType='entry';scores=[null,null,null,null,null];Object.keys(deductions).forEach(k=>deductions[k]=0);savedCurrent=false;resetTimer();document.getElementById('saveBtn').disabled=true;render()}
+document.querySelectorAll('[data-deduct]').forEach(btn=>btn.addEventListener('click',()=>{const k=btn.dataset.deduct,dir=Number(btn.dataset.dir)||0;deductions[k]=Math.max(0,(deductions[k]||0)+dir);update()}));
+['tv','dv','lv','fp'].forEach(k=>document.getElementById(k+'Rate')?.addEventListener('input',e=>{deductionRates[k]=Math.max(0,Number(e.target.value)||0);update()}));
+document.getElementById('startBtn').onclick=startTimer;document.getElementById('stopBtn').onclick=stopTimer;document.getElementById('timerResetBtn').onclick=()=>{if(confirm('Reset performer stopwatch to 00:00:00.000?'))resetTimer()};document.getElementById('saveBtn').onclick=openSave;document.getElementById('confirmSave').onclick=confirmSave;document.getElementById('cancelSave').onclick=closeSave;
+document.getElementById('nextBtn').onclick=()=>{if(!savedCurrent)return;if(performerIndex+1<entryList.length)loadPerformer(performerIndex+1)};
+document.getElementById('clearBtn').onclick=()=>{if(confirm('Clear all Anyo scores and reset the stopwatch?')){scores=[null,null,null,null,null];Object.keys(deductions).forEach(k=>deductions[k]=0);savedCurrent=false;resetTimer();document.getElementById('saveBtn').disabled=true;render()}};
+document.getElementById('changeBtn').onclick=()=>{if(document.referrer&&document.referrer.includes('/RADIUM/'))history.back();else location.href='../index.html?view=anyo'};
+document.getElementById('rankBtn').onclick=()=>{try{if(window.opener&&!window.opener.closed){window.opener.postMessage({type:'RADIUM_ANYO_OPEN_RANKING',payload:{categoryId,categoryName}},'*');return}}catch(e){}alert('Return to the Anyo page to view the current ranking.')};
+function updateClock(){document.getElementById('clock').textContent='System Time: '+new Date().toLocaleTimeString([],{hour12:false})}
+document.getElementById('fullscreenBtn')?.addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen?.();}catch(e){alert('Full screen is not available on this device/browser.');}});
+setInterval(updateClock,1000);updateClock();(async()=>{try{await loadScoreboardRole();await loadTournamentTitle();await loadOfficialEntries();if(entryList.length)loadPerformer(performerIndex);else{currentId='';render();renderTimer();document.getElementById('saveBtn').disabled=true;document.getElementById('nextBtn').disabled=true;document.getElementById('performerNumber').textContent='--';document.getElementById('category').setAttribute('data-empty','true');}}catch(e){console.error('Anyo scoreboard load failed:',e);alert('Anyo scoreboard could not be loaded from Supabase. '+(e.message||e));document.getElementById('saveBtn').disabled=true;}})();
+</script>
+</body>
+</html>
