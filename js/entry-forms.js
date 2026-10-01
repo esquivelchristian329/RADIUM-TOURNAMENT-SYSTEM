@@ -1,4 +1,4 @@
-/* RADIUM V30.4 — AI-assisted Google Forms response understanding */
+/* RADIUM V66 — CAPRISAA import + deterministic DepEd-PEKAF weight-class category resolution */
 (function(){
   'use strict';
   const $=id=>document.getElementById(id);
@@ -8,7 +8,10 @@
   const state=()=>window.RADIUM_STATE?.()||{};
   const teamByName=n=>(state().teams||[]).find(t=>String(t.name||'').trim().toLowerCase()===String(n||'').trim().toLowerCase());
   const playerByName=(name,teamId)=>(state().players||[]).find(p=>String(p.name||'').trim().toLowerCase()===String(name||'').trim().toLowerCase()&&(!teamId||String(p.teamId||'')===String(teamId)));
-  const uid=()=>typeof window.uid==='function'?window.uid():`tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  // Imported records need stable UUIDs before the cloud sync begins. Temporary IDs
+  // are rematerialized on every retry and can create duplicate teams after a partial failure.
+  const uid=()=>{try{if(typeof window.uid==='function'){const v=window.uid();if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(v)))return v;}}catch(_){}try{if(window.crypto?.randomUUID)return window.crypto.randomUUID();}catch(_){}return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&3|8)).toString(16)});};
+  const isoBirthdate=v=>{const d=parseDate(v);if(!d)return '';return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;};
   const toast=m=>window.toast?window.toast(m):alert(m);
   const split=v=>{const raw=String(v??'').trim();if(!raw)return [];let a=raw.split(/[;\n]+/).map(x=>x.trim()).filter(Boolean);if(a.length===1 && raw.includes(','))a=raw.split(',').map(x=>x.trim()).filter(Boolean);return a};
   const asNum=v=>{if(v===null||v===undefined||String(v).trim()==='')return null;const n=Number(String(v).replace(/,/g,''));return Number.isFinite(n)?n:null};
@@ -121,16 +124,16 @@
   }
 
   function parseWeightRange(text){
-    const x=normalize(text);
+    const x=normalize(text),exclusiveFrom=/\bover\b/.test(x);
     let m=x.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilos)\s*(?:and\s+above|above|upwards)/);
-    if(m)return {from:Number(m[1]),to:999};
-    m=x.match(/(\d+(?:\.\d+)?)\s*(?:up\s*to|to|[-–])\s*(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilos)/);
-    if(m)return {from:Number(m[1]),to:Number(m[2])};
+    if(m)return {from:Number(m[1]),to:999,exclusiveFrom};
+    m=x.match(/(?:over\s*)?(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilos)?\s*(?:up\s*to|to|[-–])\s*(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilos)/);
+    if(m)return {from:Number(m[1]),to:Number(m[2]),exclusiveFrom};
     m=x.match(/(?:below|under)\s*(\d+(?:\.\d+)?)\s*(?:kg|kgs|kilos)/);
-    if(m)return {from:0,to:Number(m[1])-0.01};
+    if(m)return {from:0,to:Number(m[1])-0.01,exclusiveFrom:false};
     if(/weight|kg|kgs|kilos/.test(x)){
       m=x.match(/(\d+(?:\.\d+)?)[^0-9]+(\d+(?:\.\d+)?)/);
-      if(m)return {from:Number(m[1]),to:Number(m[2])};
+      if(m)return {from:Number(m[1]),to:Number(m[2]),exclusiveFrom};
     }
     return null;
   }
@@ -174,8 +177,8 @@
     // age range. Their preset is authoritative for Elementary/Secondary matching.
     let ageFrom=Number(c.ageFrom??c.age_min??0), ageTo=Number(c.ageTo??c.age_max??99);
     const preset=String(c.preset??'').toUpperCase();
-    if(preset.includes('ANYO-ELEMENTARY')){ ageFrom=0; ageTo=12; }
-    else if(preset.includes('ANYO-SECONDARY')){ ageFrom=13; ageTo=17; }
+    if(preset.includes('ANYO-ELEMENTARY')){ ageFrom=1; ageTo=13; }
+    else if(preset.includes('ANYO-SECONDARY')){ ageFrom=1; ageTo=18; }
     const weightFrom=Number(c.weightFrom??c.weight_min??0), weightTo=Number(c.weightTo??c.weight_max??999);
     const weightRequired=isDepEdPEKAF() && cEvent!=='Arnis Anyo' ? true : !!(c.weightRequired||c.requireWeight||c.weight_required||weightFrom>0||weightTo<999);
     const anyoType=c.anyoType??c.division??'Individual';
@@ -184,10 +187,17 @@
     if(cSex&&cSex!=='Mixed'&&cSex!==r.sex)return false;
     if(r.age===null||r.age<ageFrom||r.age>ageTo)return false;
     if(cEvent!=='Arnis Anyo' && weightRequired){
-      const effectiveWeight=r.weight===null&&sel?.weightRange?.from!=null?Number(sel.weightRange.from):r.weight;
-      const effectiveTo=r.weight===null&&sel?.weightRange?.to!=null?Number(sel.weightRange.to):effectiveWeight;
-      if(effectiveWeight===null||!Number.isFinite(effectiveWeight))return false;
-      if(effectiveWeight<weightFrom||effectiveTo>weightTo)return false;
+      // For workbook category selections, match the category the coach selected.
+      // The athlete's actual weight is an eligibility check at weigh-in, not a
+      // reason to erase or reject their intended registration category.
+      if(sel?.weightRange?.from!=null&&Number.isFinite(Number(sel.weightRange.from))){
+        const selectedFrom=Number(sel.weightRange.from),selectedTo=Number(sel.weightRange.to??999);
+        if(Math.abs(weightFrom-selectedFrom)>0.51||Math.abs(weightTo-selectedTo)>0.51)return false;
+      }else{
+        const effectiveWeight=r.weight;
+        if(effectiveWeight===null||!Number.isFinite(effectiveWeight))return false;
+        if(effectiveWeight<weightFrom||effectiveWeight>weightTo)return false;
+      }
     }
     if(cEvent==='Arnis Anyo'){
       if(anyoType!==sel.anyoType)return false;
@@ -197,10 +207,57 @@
     return cEvent===sel.event;
   }
 
+  function weightClassFromText(value){
+    const x=normalize(value);
+    const classes=[
+      ['Half Lightweight',/\bhalf\s*light(?:\s*weight)?\b/],
+      ['Extra Lightweight',/\bextra\s*light(?:\s*weight)?\b/],
+      ['Featherweight',/\bfeather(?:\s*weight)?\b/],
+      ['Bantamweight',/\bbantam(?:\s*weight)?\b/],
+      ['Pinweight',/\bpin(?:\s*weight)?\b/]
+    ];
+    for(const [name,re] of classes)if(re.test(x))return name;
+    return '';
+  }
+  function categoryClass(c){return weightClassFromText(c?.weightClass)||weightClassFromText(c?.name||'');}
+  function categoryPreference(c,expectedClass){
+    const name=String(c?.name||'').trim();
+    const preset=String(c?.preset||'').toUpperCase();
+    let score=0;
+    // Prefer the canonical preset category and its standard display name. This
+    // resolves legacy rows with rounded boundaries (e.g. 51–55) alongside the
+    // preset's intentional 51.01–55 range without deleting either database row.
+    if(preset.includes('DEPED-PEKAF-COMBATIVES-12-17'))score+=100;
+    if(/^Secondary\s+(Boys|Girls)\s+/i.test(name))score+=40;
+    if(categoryClass(c)===expectedClass&&String(c?.weightClass||'').trim())score+=20;
+    if(categoryClass(c)===expectedClass)score+=10;
+    if(/\bPadded\s*Stick\b/i.test(name))score+=5;
+    return score;
+  }
   function resolveCategory(r,sel){
     const matches=(state().categories||[]).filter(c=>categoryEligibleForPlayer(c,r,sel));
-    if(matches.length===1)return {category:matches[0]};
-    if(matches.length>1)return {error:`Multiple matching categories for ${sel.label}. Staff must resolve the overlap.`};
+    const expectedClass=sel.event==='Padded Stick'?weightClassFromText(sel.label):'';
+    const classMatches=expectedClass?matches.filter(c=>categoryClass(c)===expectedClass):[];
+    if(classMatches.length===1)return {category:classMatches[0]};
+    if(classMatches.length>1){
+      // Workbook choices include the named class (Pinweight/Bantamweight/etc.).
+      // Prefer the canonical PEKAF preset where legacy rows have rounded bounds
+      // (e.g. 51–55) beside the preset's intentional 51.01–55 range.
+      const ranked=[...classMatches].sort((a,b)=>categoryPreference(b,expectedClass)-categoryPreference(a,expectedClass));
+      const selected=ranked[0];
+      return {category:selected,warning:`Duplicate/overlapping ${expectedClass} categories were detected. RADIUM selected “${selected.name}” for this import; please review the Categories page when convenient.`};
+    }
+    // If only a generic legacy category exists and its name has no class label,
+    // retain compatibility. Do not silently map a named workbook class into a
+    // different named class merely because its numeric interval overlaps.
+    if(matches.length===1&&(!expectedClass||!categoryClass(matches[0])))return {category:matches[0]};
+    if(matches.length>1){
+      const details=matches.map(c=>`${c.name||'Unnamed category'} [${c.id||'no ID'}]`).join('; ');
+      return {error:`Multiple matching categories for ${sel.label}. Conflicting categories: ${details}. Staff must resolve the overlap.`};
+    }
+    if(matches.length===1&&expectedClass&&categoryClass(matches[0])&&categoryClass(matches[0])!==expectedClass){
+      return {error:`The workbook selected ${expectedClass}, but the only matching range belongs to ${categoryClass(matches[0])}: ${matches[0].name||'Unnamed category'} [${matches[0].id||'no ID'}]. Please correct the category range or name before importing.`};
+    }
     return {error:`No RADIUM category matches ${sel.label} for ${r.sex||'unknown sex'}, age ${r.age??'unknown'}${r.weight!==null?`, ${r.weight} kg`:''}.`};
   }
 
@@ -307,6 +364,92 @@
     if(!entries['word/document.xml'])throw new Error('The Word document does not contain a readable main document.');
     return parseWordXml(entries['word/document.xml']);
   }
+  function parseCaprisaaWorkbook(wb){
+    const findSheet=(re)=>wb.SheetNames.find(n=>re.test(normalize(n)));
+    const masterName=findSheet(/athlete masterlist/),eventName=findSheet(/event registration/);
+    if(!masterName||!eventName)return null;
+    const toRows=name=>window.XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:'',blankrows:true});
+    const masterRows=toRows(masterName),eventRows=toRows(eventName);
+    const cell=(rows,r,c)=>cleanCell(rows?.[r]?.[c]??'');
+    const schoolRow=masterRows.findIndex(r=>headerKey(r?.[0])==='schoolteam');
+    const team=schoolRow>=0?cell(masterRows,schoolRow,1):'';
+    const coachRow=masterRows.findIndex(r=>headerKey(r?.[0])==='coachname');
+    const coach=coachRow>=0?cell(masterRows,coachRow,1):'';
+    const athletes=new Map();
+    let level='';
+    for(let i=0;i<masterRows.length;i++){
+      const marker=normalize(cell(masterRows,i,0));
+      if(marker.includes('elementary athlete masterlist')){level='Elementary';continue;}
+      if(marker.includes('secondary athlete masterlist')){level='Secondary';continue;}
+      if(!level||headerKey(cell(masterRows,i,0))!=='fullname')continue;
+      for(let r=i+1;r<masterRows.length;r++){
+        const first=normalize(cell(masterRows,r,0));
+        if(first.includes('elementary athlete masterlist')||first.includes('secondary athlete masterlist'))break;
+        const name=cell(masterRows,r,0);
+        if(!name||/^(select from masterlist|full name|athlete|player)$/i.test(name))continue;
+        const sex=normalizedSex(cell(masterRows,r,1));
+        const birthRaw=cell(masterRows,r,2);
+        const birth=isoBirthdate(birthRaw);
+        const age=asNum(cell(masterRows,r,3))??ageFromBirth(birthRaw);
+        const weight=level==='Secondary'?asNum(cell(masterRows,r,4)):null;
+        const key=normalize(name);
+        athletes.set(key,{name,sex,birth,age,weight,team,coach,events:[],groupRefs:[]});
+      }
+    }
+    const getAthlete=name=>athletes.get(normalize(name));
+    const unmatchedNames=new Set();
+    const addSelection=(name,eventText,groupReference='')=>{
+      if(!name||/^select from/i.test(name)||/^select (boy|girl)$/i.test(name))return;
+      const a=getAthlete(name);if(!a){unmatchedNames.add(name);return;}
+      if(!a.events.includes(eventText))a.events.push(eventText);
+      if(groupReference&&!a.groupRefs.includes(groupReference))a.groupRefs.push(groupReference);
+    };
+    let section='',grade='',combat=false;
+    for(let r=0;r<eventRows.length;r++){
+      const a=normalize(cell(eventRows,r,0)),d=normalize(cell(eventRows,r,3));
+      if(a.includes('elementary - anyo')||a.includes('elementary anyo')){grade='Elementary';combat=false;section='';continue;}
+      if(a.includes('secondary - anyo')||a.includes('secondary anyo')){grade='Secondary';combat=false;section='';continue;}
+      if(a.includes('secondary - combative')||a.includes('secondary combative')){grade='Secondary';combat=true;section='';continue;}
+      if(combat){
+        const weightRow=/pinweight|bantamweight|featherweight|extra lightweight|half lightweight/.test(a);
+        if(!weightRow)continue;
+        const range=cell(eventRows,r,1),boy=cell(eventRows,r,2),girl=cell(eventRows,r,5);
+        const label=cell(eventRows,r,0);
+        if(boy&&!/^select boy$/i.test(boy))addSelection(boy,`Padded Stick ${label} ${range}`);
+        if(girl&&!/^select girl$/i.test(girl))addSelection(girl,`Padded Stick ${label} ${cell(eventRows,r,4)}`);
+        continue;
+      }
+      if(/individual|synchronized|synchronised|team \(synchronized mixed\)/.test(a)){
+        section=a;
+        continue;
+      }
+      if(!section||!grade)continue;
+      const isPlayerRow=/^(athlete|player\s*\d+|boy|girl)$/.test(a)||/^(athlete|player\s*\d+|boy|girl)$/.test(d);
+      if(!isPlayerRow)continue;
+      const weapon=/espada\s*y\s*daga/.test(section)?'Espada y Daga':/double weapon/.test(section)?'Double Weapon':/single weapon/.test(section)?'Single Weapon':'';
+      if(!weapon)continue;
+      const type=/mixed/.test(section)?'Mixed':/synchronized|synchronised/.test(section)?'Synchronized':'Individual';
+      const groupReference=type==='Individual'?'':`CAPRISAA-${grade}-${type}`;
+      const leftName=cell(eventRows,r,1),rightName=cell(eventRows,r,4);
+      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo`,groupReference);
+      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo`,groupReference);
+    }
+    if(unmatchedNames.size)throw new Error('These selected names in EVENT REGISTRATION were not found in ATHLETE MASTERLIST: '+[...unmatchedNames].join(', ')+'. Correct the spelling or add the athlete to the masterlist, then upload again.');
+    const rows=[];
+    for(const a of athletes.values()){
+      // Import the complete masterlist, not only athletes who selected an event.
+      // Event selection is optional for a masterlist-only player.
+      rows.push({
+        'Full Name':a.name,'Sex':a.sex,'Birthdate':a.birth,'Age':a.age??'',
+        'Weight (kg)':a.weight??'','Team / Club':a.team,'Coach Name':a.coach,
+        'Events Selected':a.events.join('; '),'Group Name / Group Reference':a.groupRefs.join('; '),
+        __radiumStructuredWorkbook:true
+      });
+    }
+    if(!rows.length)throw new Error('The CAPRISAA workbook was recognized, but no athletes were found in ATHLETE MASTERLIST. Add the athletes to the masterlist, then upload again.');
+    return rows;
+  }
+
   async function parseWorkbook(buf,name){
     if(/\.csv$/i.test(name))return parseCsv(new TextDecoder().decode(buf));
     if(/\.docx$/i.test(name))return await parseDocx(buf);
@@ -315,6 +458,8 @@
     try{
       const wb=window.XLSX.read(buf,{type:'array',cellDates:false,WTF:false});
       if(!Array.isArray(wb.SheetNames)||!wb.SheetNames.length)throw new Error('The Excel file has no worksheet.');
+      const caprisaaRows=parseCaprisaaWorkbook(wb);
+      if(caprisaaRows)return caprisaaRows;
       const all=[];
       for(const sheetName of wb.SheetNames){
         const ws=wb.Sheets?.[sheetName];if(!ws)continue;
@@ -340,18 +485,34 @@
     const teamsNeedingCreation=new Set();
     const teamsAlreadyKnown=new Set((state().teams||[]).map(t=>String(t.name??t.team_name??'').trim().toLowerCase()).filter(Boolean));
     players.forEach((r,i)=>{
-      r.errors=[];r.warnings=[];r.categories=[];r.selections=eventSelections(r.eventsRaw);
+      r.errors=[];r.warnings=[];r.categories=[];r.categorySelections=[];r.selections=eventSelections(r.eventsRaw);
       if(rows[i]?.__radiumAi)r.ai=rows[i].__radiumAi;
       if(!r.name)r.errors.push('Full Name required');
       if(!r.sex)r.errors.push('Sex required (Male/Female)');
       if(r.age===null&&r.birth==='')r.errors.push('Birthdate or Age required');
-      if(!r.eventsRaw && !r.categoryHints?.length)r.errors.push('Events Selected required');
+      if(!r.eventsRaw && !r.categoryHints?.length && rows[i]?.__radiumStructuredWorkbook!==true)r.errors.push('Events Selected required');
       if(!r.selections.length&&r.categoryHints?.length)r.selections=[...r.categoryHints];
       if(!r.selections.length&&r.eventsRaw)r.errors.push(`Unrecognized event choice: ${r.eventsRaw}`);
       for(const sel of r.selections){
         if(sel.event==='Knifepoint'){r.errors.push('Knifepoint is selected, but RADIUM currently has no Knifepoint category type.');continue;}
         if(categoryUsesWeight({event:sel.event})&&r.weight===null)r.errors.push(`${sel.label}: Weight required`);
-        const found=resolveCategory(r,sel);if(found.error)r.errors.push(found.error);else r.categories.push(found.category.name);
+        const found=resolveCategory(r,sel);
+        if(found.error)r.errors.push(found.error);
+        else{
+          if(found.warning)r.warnings.push(found.warning);
+          r.categories.push(found.category.name);
+          r.categorySelections.push({id:String(found.category.id),name:found.category.name,event:sel.event});
+          if(sel.event==='Padded Stick'&&r.weight!==null){
+            const c=found.category;
+            const min=Number(c.weightFrom??c.weight_min);
+            const max=Number(c.weightTo??c.weight_max);
+            const hasBounds=Number.isFinite(min)&&Number.isFinite(max)&&(min>0||max<999);
+            const wr=sel.weightRange;
+            const tooLight=hasBounds?r.weight<min:(wr?.from!=null?(wr.exclusiveFrom?r.weight<=Number(wr.from):r.weight<Number(wr.from)):false);
+            const tooHeavy=hasBounds?r.weight>max:(wr?.to!=null?r.weight>Number(wr.to):false);
+            if(tooLight||tooHeavy)r.warnings.push(`Recorded weight ${r.weight} kg is outside selected category ${found.category.name}. Registration is retained; official eligibility is determined by verified weigh-in.`);
+          }
+        }
       }
       r.categories=[...new Set(r.categories)];
       if(r.team){
@@ -392,6 +553,16 @@
       }
       p.registrationSource='File Import';p.registrationContact=r.contact||p.registrationContact||'';p.email=r.email||p.email||'';p.parentGuardianName=r.parent||p.parentGuardianName||'';p.parentGuardianContact=r.parentContact||p.parentGuardianContact||'';
       p.anyoGroupReference=r.groupReference||p.anyoGroupReference||'';p.anyoGroupMode=r.groupMode||p.anyoGroupMode||'';
+      // Keep the coach's explicit Combative category selection even when declared
+      // weight is outside that class. Verified weigh-in controls eligibility later.
+      s.registrations=Array.isArray(s.registrations)?s.registrations:[];
+      for(const choice of (r.categorySelections||[])){
+        const c=(s.categories||[]).find(x=>String(x.id)===String(choice.id));
+        if(!c||choice.event==='Arnis Anyo'||choice.event==='Livestick')continue;
+        const key=String(p.id)+'|'+String(c.id);
+        if(!s.registrations.some(x=>String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'')===key&& !['CANCELLED','DELETED','WITHDRAWN'].includes(String(x.status||'ACTIVE').toUpperCase())))
+          s.registrations.push({id:null,teamId:p.teamId||'',playerId:p.id,categoryId:c.id,anyoEntryId:null,status:'ACTIVE',feeAmount:Number(c.registrationFee)||0,registeredAt:new Date().toISOString()});
+      }
       registrations+=r.categories.length;
     }
     // Build Synchronized/Mixed Anyo entries from individual Google Form responses.
@@ -428,7 +599,8 @@
     const cloudOk=await window.RADIUM_CLOUD?.flush?.();
     if(!cloudOk){
       window.renderAll?.();
-      notify('<b>Import was not confirmed by the RADIUM Tournament Service.</b> RADIUM kept the import preview so it is not silently lost. Check the Data Synchronization status before trying again.','error');
+      const cloudReason=window.RADIUM_CLOUD?.state?.lastError?.message||'The service did not confirm the save.';
+      notify('<b>Import was not confirmed by the RADIUM Tournament Service.</b> '+esc(cloudReason)+' RADIUM kept the import preview so it is not silently lost. Correct the reported issue before retrying.','error');
       return;
     }
     window.renderAll?.();
@@ -484,7 +656,8 @@
       const rows=Array.isArray(parsed)?parsed:[];
       if(!rows.length)throw new Error('No readable registration rows were found in the selected file.');
       stage='validating registration rows';
-      lastRawRows=rows;
+      const structuredWorkbook=rows.some(r=>r?.__radiumStructuredWorkbook===true);
+      lastRawRows=structuredWorkbook?[]:rows;
       imported=validate(rows);
       if(!imported||!Array.isArray(imported.players))throw new Error('The importer could not create a registration preview.');
       renderPreview();
@@ -492,8 +665,12 @@
         notify('<b>No tournament categories are loaded.</b> RADIUM will not guess categories. Create/load the categories first, then import again.','error');
         return;
       }
-      stage='AI understanding';
-      await runAI(rows);
+      if(structuredWorkbook){
+        notify('<b>CAPRISAA workbook recognized.</b> Only selected event entries were read. DepEd-PEKAF Anyo is set to Non-Traditional automatically; weight mismatches are warnings and will be checked at weigh-in.','success');
+      }else{
+        stage='AI understanding';
+        await runAI(rows);
+      }
     }catch(e){
       console.error('RADIUM entry import failed at '+stage,e);
       notify('<b>Could not import this file.</b><br><small>Stage: '+esc(stage)+'</small><br>'+esc(e?.message||e),'error');

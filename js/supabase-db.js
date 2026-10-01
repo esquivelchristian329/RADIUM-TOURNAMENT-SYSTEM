@@ -1,18 +1,43 @@
 /* RADIUM DB bridge: online-only Supabase database connection. */
 (function(){
   const cfg = window.RADIUM_SUPABASE_CONFIG || {};
-  const state = { enabled:false, client:null, online:navigator.onLine, lastError:null };
+  const state = { enabled:false, client:null, online:typeof navigator==='undefined'||navigator.onLine, lastError:null, initPromise:null };
   window.RADIUM_DB = {
     state,
     isConfigured(){ return !!(cfg.url && cfg.anonKey && !cfg.url.includes('YOUR_PROJECT') && !cfg.anonKey.includes('YOUR_')); },
     async init(){
       if(!this.isConfigured()) return {enabled:false, reason:'not-configured'};
+
+      // Reuse one Supabase client for the lifetime of this page. Many parts of
+      // RADIUM call init() during boot and normal actions; creating a new client
+      // each time can race Auth/session initialization and cause opaque runtime
+      // errors during the tournament lookup.
+      if(state.client && state.enabled) return {enabled:true};
+      if(state.initPromise) return state.initPromise;
+
+      state.initPromise=(async()=>{
+        try{
+          const mod = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+          // Another init may have completed while the module was loading.
+          if(!state.client){
+            state.client = mod.createClient(cfg.url, cfg.anonKey, {
+              auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+            });
+          }
+          state.enabled = true;
+          state.lastError = null;
+          return {enabled:true};
+        }catch(e){
+          state.lastError=e;
+          state.enabled=!!state.client;
+          return {enabled:state.enabled, reason:e?.message||String(e)};
+        }
+      })();
       try{
-        const mod = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-        state.client = mod.createClient(cfg.url, cfg.anonKey, {auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
-        state.enabled = true;
-        return {enabled:true};
-      }catch(e){ state.lastError=e; return {enabled:false, reason:e.message}; }
+        return await state.initPromise;
+      }finally{
+        state.initPromise=null;
+      }
     },
     client(){ if(!state.client) throw new Error('Supabase is not initialized'); return state.client; },
     async signIn(email,password){
@@ -78,6 +103,14 @@
     async rpc(functionName, args){ return this.client().rpc(functionName, args || {}); },
     async remove(table, filters){
       let q=this.client().from(table).delete(); Object.entries(filters||{}).forEach(([k,v])=>q=q.eq(k,v)); return q;
+    },
+    async removeIn(table, column, values, filters){
+      const ids=Array.isArray(values)?values.filter(v=>v!==null&&v!==undefined):[];
+      if(!ids.length)return {data:null,error:null};
+      let q=this.client().from(table).delete();
+      Object.entries(filters||{}).forEach(([k,v])=>q=q.eq(k,v));
+      q=q.in(column,ids);
+      return q;
     },
     subscribeMatches(tournamentId, callback){
       if(!state.enabled) return null;

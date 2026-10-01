@@ -9,7 +9,7 @@
   const uid=()=>`tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
   const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   function replaceIds(obj,from,to){if(!obj||from===to)return;const seen=new WeakSet();const walk=v=>{if(!v||typeof v!=='object'||seen.has(v))return;seen.add(v);for(const k of Object.keys(v)){if(typeof v[k]==='string'&&v[k]===from)v[k]=to;else if(typeof v[k]==='object')walk(v[k]);}};walk(obj);}
-  let timer=null,syncing=false,initialized=false;
+  let timer=null,syncing=false,startingPush=false,initialized=false,categoryDeleteInProgress=false,syncAgain=false,changeVersion=0;
   const activeId=()=>String(cloud?.state?.tournamentId||'');
   const cleanId=id=>UUID.test(String(id||''))?String(id):uid();
   async function hashPin(pin){const bytes=new TextEncoder().encode(String(pin||''));const hash=await crypto.subtle.digest('SHA-256',bytes);return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');}
@@ -226,13 +226,49 @@
   function browserOnline(){return typeof navigator==='undefined'||navigator.onLine!==false;}
   const cloud={
     state:{ready:false,syncing:false,lastSync:null,lastError:null,tournamentId:null,loaded:false,dirty:false,pendingCount:0},
-    async init(){if(initialized)return true;if(!window.RADIUM_DB)return false;const r=await window.RADIUM_DB.init();initialized=!!r?.enabled;this.state.ready=initialized;if(!initialized)this.state.lastError=new Error(r?.reason||'Supabase could not initialize');return initialized;},
+    async init(){
+      if(initialized && window.RADIUM_DB?.state?.client && window.RADIUM_DB?.state?.enabled) return true;
+      if(!window.RADIUM_DB){this.state.ready=false;this.state.lastError=new Error('Supabase database bridge is unavailable.');return false;}
+      try{
+        const r=await window.RADIUM_DB.init();
+        initialized=!!r?.enabled;
+        this.state.ready=initialized;
+        if(!initialized)this.state.lastError=new Error(r?.reason||'Supabase could not initialize');
+        else this.state.lastError=null;
+        return initialized;
+      }catch(e){
+        initialized=false;this.state.ready=false;this.state.lastError=e;
+        console.error('RADIUM Supabase initialization failed:',e);
+        return false;
+      }
+    },
     getId(){return String(this.state.tournamentId||'')},
     setId(id){this.state.tournamentId=id||null;updateTournamentIdBadge(this.state.tournamentId)},
     clearId(){this.state.tournamentId=null;this.state.loaded=false;updateTournamentIdBadge(null)},
     payload(){const x=JSON.parse(JSON.stringify(window.__RADIUM_GET_DATA?window.__RADIUM_GET_DATA():fresh()));if(x.setup){delete x.setup.pin;delete x.setup.scoreboardLogos;}delete x.autoBackups;delete x.resultUndo;x.tournamentId=this.getId()||x.tournamentId||null;x.storageNamespace=null;x._cloud={version:3,clientSavedAt:Date.now(),savedAt:new Date().toISOString()};return x},
-    setStatus(text,ok,errorText){setTimeout(updateEmergencyBanner,0);const el=document.getElementById('dbTournamentState');if(el)el.textContent=text;const pill=document.getElementById('dbStatusPill');if(pill){pill.classList.toggle('db-ok',!!ok);pill.classList.toggle('db-warn',!ok)}const err=document.getElementById('dbStatusError');if(err){err.hidden=!errorText;err.textContent=errorText||''}},
+    setStatus(text,ok,errorText){setTimeout(updateEmergencyBanner,0);const el=document.getElementById('dbTournamentState');if(el)el.textContent=text;const err=document.getElementById('dbStatusError');if(err){err.hidden=!errorText;err.textContent=errorText||''}},
     errorText(e){const raw=e?.message||e?.details?.message||e?.details?.hint||String(e||'Unknown error');return role()==='admin'?raw:'Please check the tournament connection and try again.'},
+    async deleteCategory(categoryId){
+      if(!(await this.init()))throw new Error('Supabase is not configured.');
+      if(!['admin','tournament_manager'].includes(role()))throw new Error('Admin or Tournament Manager account required.');
+      const tid=this.getId();if(!tid)throw new Error('No active tournament selected.');
+      if(!UUID.test(String(categoryId||'')))throw new Error('Category ID is invalid; reload categories from Supabase and try again.');
+      categoryDeleteInProgress=true;clearTimeout(timer);timer=null;
+      try{
+        while(syncing||startingPush)await new Promise(resolve=>setTimeout(resolve,50));
+        const db=window.RADIUM_DB;
+        const before=await db.select('categories',{select:'id,tournament_id,name',eq:{id:categoryId,tournament_id:tid},limit:1});
+        if(before.error)throw before.error;
+        if(!before.data?.length)throw new Error('This category is not present in Supabase. Refresh the page and check the selected tournament.');
+        const removed=await db.remove('categories',{id:categoryId,tournament_id:tid});
+        if(removed?.error)throw removed.error;
+        const verify=await db.select('categories',{select:'id',eq:{id:categoryId,tournament_id:tid},limit:1});
+        if(verify.error)throw verify.error;
+        if(verify.data?.length)throw new Error('Supabase did not confirm category deletion. The category was kept in the page.');
+        syncAgain=false;
+        return true;
+      }finally{categoryDeleteInProgress=false;if(syncAgain){syncAgain=false;clearTimeout(timer);timer=setTimeout(()=>this.push(),200);}}
+    },
     async syncNormalized(tid,state){
       if(!tid||!state)throw new Error('Tournament ID is missing.');
       const db=window.RADIUM_DB;
@@ -367,10 +403,20 @@
       const regByPlayer=new Map((existingRegs.data||[]).filter(r=>r.player_id).map(r=>[String(r.player_id)+'|'+String(r.category_id),r]));
       const regByEntry=new Map((existingRegs.data||[]).filter(r=>r.anyo_entry_id).map(r=>[String(r.anyo_entry_id),r]));
       const regRows=[]; const free=String(state.setup?.billingMode||'PAID').toUpperCase()==='FREE';
+      const explicitRegistrationKeys=new Set((state.registrations||[]).filter(r=>r&&r.playerId&&r.categoryId&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'ACTIVE').toUpperCase())).map(r=>String(r.playerId)+'|'+String(r.categoryId)));
       for(const c of state.categories||[]) for(const pl of state.players||[]){
-        if(!playerIds.has(pl.id)||!eligibleForCategory(pl,c))continue;
+        if(!playerIds.has(pl.id))continue;
         if(c.event==='Arnis Anyo') continue;
-        const key=String(pl.id)+'|'+String(c.id),old=regByPlayer.get(key);
+        const key=String(pl.id)+'|'+String(c.id),explicit=explicitRegistrationKeys.has(key);
+        if(explicit){
+          // Explicit registration records preserve the category selected on the entry
+          // form; age/sex remain checks here, while actual weight eligibility is decided
+          // from the verified weigh-in and never silently changes the selected class.
+          const age=Number(pl.age),min=Number(c.ageFrom??c.age_min??0),max=Number(c.ageTo??c.age_max??99),sex=c.sex||c.gender||'';
+          if(!Number.isFinite(age)||age<min||age>max)continue;
+          if(sex&&sex!=='Mixed'&&sex!==(pl.sex||pl.gender))continue;
+        }else if(!eligibleForCategory(pl,c))continue;
+        const old=regByPlayer.get(key);
         regRows.push({id:old?.id||null,tournament_id:tid,team_id:teamIds.has(pl.teamId)?pl.teamId:null,player_id:pl.id,category_id:c.id,anyo_entry_id:null,status:old?.status||'ACTIVE',fee_amount:free?0:(old?.fee_amount!=null?Number(old.fee_amount):Number(c.registrationFee)||0),registered_at:old?.registered_at||new Date().toISOString(),updated_at:new Date().toISOString()});
       }
       for(const e of anyoEntries){
@@ -411,10 +457,10 @@
       for(const c of state.categories||[])for(const round of c.bracket?.rounds||[])for(const m of round||[])if(m?.id&&UUID.test(String(m.id))) { const dbm=matches.find(x=>x.id===m.id); if(dbm) await fail('Match metadata update',await db.update('matches',{metadata:{...(dbm.metadata||{}),nextMatchId:UUID.test(String(m.nextMatchId||''))?m.nextMatchId:null,nextSlot:m.nextSlot||null,firstRoundPosition:m.firstRoundPosition??null,history:m.history||[],roundScores:m.roundScores||null,redBye:!!m.redBye,blueBye:!!m.blueBye}},{id:m.id})); }
       const resultRows=[];for(const x of resultByMatch){const row=matches.find(m=>m.category_id===x.row.category_id&&m.round===x.row.round&&m.match_number===x.row.match_number);if(row)resultRows.push({match_id:row.id,blue_score:Number(x.r.blueScore)||0,red_score:Number(x.r.redScore)||0,blue_round_wins:Number(x.r.blueRoundWins)||0,red_round_wins:Number(x.r.redRoundWins)||0,winner_player_id:x.winnerId,blue_fouls:Number(x.r.blueFouls)||0,red_fouls:Number(x.r.redFouls)||0,blue_disarms:Number(x.r.blueDisarms)||0,red_disarms:Number(x.r.redDisarms)||0,submitted_by:null});}
       for(const row of resultRows){const old=await fail('Match result lookup',await db.select('match_results',{select:'id',eq:{match_id:row.match_id},limit:1}));if(old.data?.length)await fail('Match result update',await db.update('match_results',row,{match_id:row.match_id}));else await fail('Match result insert',await db.insert('match_results',row));}
-      const matchIdSet=new Set(matches.map(m=>m.id));const existingMatches=await fail('Matches cleanup read',await db.select('matches',{select:'id',eq:{tournament_id:tid}}));for(const old of existingMatches.data||[])if(!matchIdSet.has(old.id))await fail('Stale match cleanup',await db.remove('matches',{id:old.id}));
+      const matchIdSet=new Set(matches.map(m=>m.id));const existingMatches=await fail('Matches cleanup read',await db.select('matches',{select:'id',eq:{tournament_id:tid}}));const staleMatchIds=(existingMatches.data||[]).filter(old=>!matchIdSet.has(old.id)).map(old=>old.id);if(staleMatchIds.length){if(typeof db.removeIn==='function')await fail('Stale match cleanup',await db.removeIn('matches','id',staleMatchIds,{tournament_id:tid}));else for(const staleId of staleMatchIds)await fail('Stale match cleanup',await db.remove('matches',{id:staleId,tournament_id:tid}));}
       await cleanupTop('players',playerIds,tid,db,fail);await cleanupTop('categories',catIds,tid,db,fail);await cleanupTop('teams',teamIds,tid,db,fail);
       const existingJudges=await fail('Anyo judges read',await db.select('anyo_judges',{select:'id,tournament_id,name,judge_number,active',eq:{tournament_id:tid}}));const judgesByNo=new Map((existingJudges.data||[]).map(j=>[Number(j.judge_number),j]));const judgeByNo=new Map();for(let i=1;i<=5;i++){const old=judgesByNo.get(i);if(old){judgeByNo.set(i,old.id);await fail('Anyo judge update',await db.update('anyo_judges',{name:old.name||('JUDGE '+i),active:true},{id:old.id}));}else{const r=await fail('Anyo judge insert',await db.insert('anyo_judges',{tournament_id:tid,name:'JUDGE '+i,judge_number:i,active:true}));const id=r.data?.[0]?.id;if(!id)throw new Error('Anyo judge insert: Supabase did not return generated ID.');judgeByNo.set(i,id);}}
-      const perfRows0=[],scoreRows0=[],deductRows0=[];const anyoCats=new Set(cats.filter(c=>c.event_type==='Anyo').map(c=>c.id));const entryIds=new Set(anyoEntries.map(e=>String(e.id)));for(const r of (state.anyoResults||[])){if(!anyoCats.has(r.categoryId)||!r.competitorId)continue;const entryId=toCloudEntryId(r.entryId||r.competitorId);if(!entryIds.has(String(entryId)))continue;const perfId=r.id;perfRows0.push({id:perfId,tournament_id:tid,category_id:r.categoryId,entry_id:entryId,player_id:null,team_id:null,performer_index:Number(r.performerIndex)||0,judge_count:Math.min(5,Math.max(3,Number(r.judgeCount)||5)),raw_total:Number(r.rawTotal)||0,kept_total:Number(r.keptTotal)||0,average:Number(r.average)||0,judge_average:Number(r.judgeAverage??r.average)||0,final_score:Number(r.finalScore??r.average)||0,total_deduction:Number(r.totalDeduction)||0,deduction_rates:r.deductionRates||{},dropped_scores:r.dropped||[],elapsed_ms:Number(r.elapsedMs)||0,elapsed_time:r.elapsedTime||null,finished:r.finished!==false,started_at:null,finished_at:r.finishedAt||r.time||new Date().toISOString(),metadata:{categoryName:r.categoryName||'',competitorType:'entry',entryId:entryId}});(r.scores||[]).forEach((score,i)=>{if(score!=null&&judgeByNo.has(i+1))scoreRows0.push({id:null,performance_id:perfId,judge_id:judgeByNo.get(i+1),score:Number(score)});});Object.entries(r.deductions||{}).forEach(([k,q])=>{const qty=Number(q)||0;if(qty>0)deductRows0.push({id:null,performance_id:perfId,violation_type:k==='tv'?'TIME':k==='dv'?'DISARM':k==='lv'?'OUT_OF_MAT':'OTHER',quantity:qty,deduction_amount:(Number(r.deductionRates?.[k])||0)*qty,recorded_by:null});});}
+      const perfRows0=[],scoreRows0=[],deductRows0=[];const anyoCats=new Set(cats.filter(c=>c.event_type==='Anyo').map(c=>c.id));const entryIds=new Set(anyoEntries.map(e=>String(e.id)));for(const r of (state.anyoResults||[])){if(!anyoCats.has(r.categoryId)||!r.competitorId)continue;const entryId=toCloudEntryId(r.entryId||r.competitorId);if(!entryIds.has(String(entryId)))continue;const perfId=r.id;perfRows0.push({id:perfId,tournament_id:tid,category_id:r.categoryId,entry_id:entryId,attempt_number:Math.max(1,Number(r.attemptNumber)||1),player_id:null,team_id:null,performer_index:Number(r.performerIndex)||0,judge_count:Math.min(5,Math.max(3,Number(r.judgeCount)||5)),raw_total:Number(r.rawTotal)||0,kept_total:Number(r.keptTotal)||0,average:Number(r.average)||0,judge_average:Number(r.judgeAverage??r.average)||0,final_score:Number(r.finalScore??r.average)||0,total_deduction:Number(r.totalDeduction)||0,deduction_rates:r.deductionRates||{},dropped_scores:r.dropped||[],elapsed_ms:Number(r.elapsedMs)||0,elapsed_time:r.elapsedTime||null,finished:r.finished!==false,started_at:null,finished_at:r.finishedAt||r.time||new Date().toISOString(),metadata:{categoryName:r.categoryName||'',competitorType:'entry',entryId:entryId}});(r.scores||[]).forEach((score,i)=>{if(score!=null&&judgeByNo.has(i+1))scoreRows0.push({id:null,performance_id:perfId,judge_id:judgeByNo.get(i+1),score:Number(score)});});Object.entries(r.deductions||{}).forEach(([k,q])=>{const qty=Number(q)||0;if(qty>0)deductRows0.push({id:null,performance_id:perfId,violation_type:k==='tv'?'TIME':k==='dv'?'DISARM':k==='lv'?'OUT_OF_MAT':'OTHER',quantity:qty,deduction_amount:(Number(r.deductionRates?.[k])||0)*qty,recorded_by:null});});}
       const existingPerf=await fail('Anyo performance cleanup read',await db.select('anyo_performances',{select:'id',eq:{tournament_id:tid}}));const perfIds0=new Set(perfRows0.filter(x=>UUID.test(String(x.id||''))).map(x=>x.id));for(const old of existingPerf.data||[])if(!perfIds0.has(old.id))await fail('Stale Anyo performance cleanup',await db.remove('anyo_performances',{id:old.id}));
       const perfs=await materialize('anyo_performances',perfRows0,'Anyo performances sync');
       const perfMap=new Map();for(let i=0;i<perfs.length;i++){const old=perfRows0[i]?.id;if(old&&!UUID.test(String(old)))perfMap.set(old,perfs[i].id);}
@@ -428,20 +474,22 @@
     async ensureMembership(tid){const s=await window.RADIUM_DB.session();const uidUser=s.data?.session?.user?.id;if(!uidUser)throw new Error('Supabase session is missing after login.');if(role()==='admin'){const r=await window.RADIUM_DB.upsertNoReturn('tournament_users',{tournament_id:tid,user_id:uidUser,role:'admin'},{onConflict:'tournament_id,user_id'});if(r.error)throw r.error;return true}if(['tournament_manager','accountant','table_official'].includes(role())){const a=await window.RADIUM_DB.rpc('radium_get_my_assigned_tournament',{});if(a.error)throw a.error;const row=Array.isArray(a.data)?a.data[0]:a.data;if(!row?.id)throw new Error('No tournament is assigned to this account. Ask the Admin to assign one.');if(String(row.id)!==String(tid))throw new Error('This staff account can only use its assigned tournament.');return true}throw new Error('Authorized RADIUM staff account required.')},
     async ensureParent(tid,p){const setup=p.setup||{};const existing=await window.RADIUM_DB.select('tournaments',{select:'id,official_pin_hash',eq:{id:tid},limit:1});if(existing.error)throw existing.error;const oldHash=existing.data?.[0]?.official_pin_hash||null;const pinHash=String(setup.pin||'')?await hashPin(setup.pin):(setup.pinHash||oldHash||null);const billingMode=String(setup.billingMode||'PAID').toUpperCase()==='FREE'?'FREE':'PAID';const incoming={version:15,setup:{...setup,billingMode,currency:'PHP',pin:undefined,pinHash:undefined},activeCategory:p.activeCategory||null,locked:!!p.locked,_cloud:{version:3,officialPinHash:pinHash,billingMode,currency:'PHP'}};delete incoming.setup.pin;delete incoming.setup.pinHash;if(!existing.data?.length){if(role()!=='admin')throw new Error('Only Admin can create the initial tournament record.');const row={id:tid,name:setup.name||'Untitled Tournament',venue:setup.venue||null,event_date:setup.date||null,organizer:setup.organizer||null,status:'draft',official_pin_hash:pinHash,billing_mode:billingMode,currency:'PHP',settings:incoming};const r=await window.RADIUM_DB.insertNoReturn('tournaments',row);if(r.error)throw r.error;return}const r=await window.RADIUM_DB.rpc('radium_save_tournament',{tid,incoming});if(r.error)throw r.error;},
     async push(overridePayload=null){
-      if(syncing)return false;
-      if(!(await this.init()))return false;
-      if(!window.RADIUM_AUTH?.user){this.state.lastError=new Error('No authenticated RADIUM user.');return false}
-      if(!['admin','tournament_manager'].includes(role())){this.state.lastError=new Error('Admin or Tournament Manager account required.');return false}
+      if(categoryDeleteInProgress||syncing||startingPush){syncAgain=true;return false;}
+      startingPush=true;
+      const startedVersion=changeVersion;
+      if(!(await this.init())){startingPush=false;return false;}
+      if(!window.RADIUM_AUTH?.user){this.state.lastError=new Error('No authenticated RADIUM user.');startingPush=false;return false}
+      if(!['admin','tournament_manager'].includes(role())){this.state.lastError=new Error('Admin or Tournament Manager account required.');startingPush=false;return false}
       const id=this.getId();
-      if(!id){this.state.lastError=new Error('No active tournament selected.');return false}
+      if(!id){this.state.lastError=new Error('No active tournament selected.');startingPush=false;return false}
       const p=overridePayload||this.payload();
       this.state.dirty=true;
       if(!browserOnline()){
         this.state.pendingCount=0;this.state.lastError=new Error(emergencyMessage());
         this.setStatus('OFFLINE • NOT SAVED',false,emergencyMessage());
-        return false;
+        startingPush=false;return false;
       }
-      syncing=true;this.state.syncing=true;this.setStatus('SYNCING TO SUPABASE...',true);
+      startingPush=false;syncing=true;this.state.syncing=true;this.setStatus('SYNCING TO SUPABASE...',true);
       try{
         if(!this.state.loaded){const loaded=await this.pull();if(!loaded)throw new Error('Cloud state is not loaded yet. Refusing to overwrite Supabase with an uninitialized local state.');}
         await this.ensureParent(id,p);await this.ensureMembership(id);await this.syncNormalized(id,p);
@@ -454,14 +502,14 @@
         if(expected && actual!==expected){
           throw new Error(`Supabase save verification failed: expected tournament name "${expected}" but Supabase returned "${actual||'empty'}".`);
         }
-        this.state.lastSync=saved.updated_at||new Date().toISOString();this.state.tournamentId=id;this.state.lastError=null;this.state.dirty=false;
+        this.state.lastSync=saved.updated_at||new Date().toISOString();this.state.tournamentId=id;this.state.lastError=null;this.state.dirty=changeVersion>startedVersion;
         await emergencyClear(id);this.state.pendingCount=0;this.setStatus('ONLINE • SYNCED',true);return true;
       }catch(e){
         this.state.lastError=e;this.state.pendingCount=0;
         this.setStatus('SUPABASE SAVE FAILED',false,'Supabase sync failed. No local tournament copy was written. Please retry when connected.');
         console.error('RADIUM cloud push failed:',e);
         return false;
-      }finally{syncing=false;this.state.syncing=false}
+      }finally{syncing=false;this.state.syncing=false;const shouldRetry=syncAgain||changeVersion>startedVersion;if(shouldRetry){syncAgain=false;clearTimeout(timer);timer=setTimeout(()=>{if(!categoryDeleteInProgress)this.push();else syncAgain=true},150);}}
     },
     async flushEmergency(){return false},
     async pendingEmergency(){this.state.pendingCount=0;return null},
@@ -517,7 +565,7 @@
       const matchRows=matches.data||[];const resultRows=results.data||[];const resultByMatch=new Map(resultRows.map(r=>[r.match_id,r]));const categoryLocal=catRows.map(c=>{const rounds=[];const ms=matchRows.filter(m=>m.category_id===c.id).sort((a,b)=>a.round-b.round||a.match_number-b.match_number);for(const m of ms){const ri=Math.max(0,Number(m.round)-1),mi=Math.max(0,Number(m.match_number)-1);if(!rounds[ri])rounds[ri]=[];const meta=m.metadata||{};const rr=resultByMatch.get(m.id);const courtNo=Number((courts.data||[]).find(x=>x.id===m.court_id)?.court_number)||null;rounds[ri][mi]={id:m.id,red:m.red_player_id||null,blue:m.blue_player_id||null,redScore:Number(m.red_score)||0,blueScore:Number(m.blue_score)||0,completed:['COMPLETED','BYE'].includes(String(m.status)),winner:m.winner_player_id||null,redBye:!!meta.redBye,blueBye:!!meta.blueBye,court:courtNo,matchFormat:m.match_format==='single'?'single':'best3',history:meta.history||[],nextMatchId:meta.nextMatchId||null,nextSlot:meta.nextSlot||null,firstRoundPosition:meta.firstRoundPosition??null};}
         let b=c.bracket||{};b={...b,rounds:rounds.map(r=>r||[]),locked:!!(b.locked||row.settings?.locked)};const depedCat=String(row.settings?.competitionProgram||row.settings?.competition_program||'').toUpperCase()==='DEPED_PEKAF'&&c.event_type!=='Anyo';return{id:c.id,name:c.name,sex:c.gender||'Male',event:c.event_type==='Anyo'?'Arnis Anyo':(c.event_type==='Livestick'?'Livestick':'Padded Stick'),eventNumber:c.event_number||'',judges:Number(c.judges)||5,preset:c.preset||'',anyoType:c.division||'',anyoStyle:c.style||'',anyoWeapon:c.weapon||'Any',ageFrom:Number(c.age_min)||0,ageTo:Number(c.age_max)||99,weightFrom:Number(c.weight_min)||0,weightTo:Number(c.weight_max)||999,weightRequired:depedCat||!!c.weight_required,bracketBy:depedCat?'weight':(c.bracket_by||null),draw:c.rules?.draw||'random',bracket:b};});
       const localResults=resultRows.map(r=>{const m=matchRows.find(x=>x.id===r.match_id),c=categoryLocal.find(x=>x.id===m?.category_id),bp=localPlayers.find(p=>p.id===m?.blue_player_id),rp=localPlayers.find(p=>p.id===m?.red_player_id),wp=localPlayers.find(p=>p.id===r.winner_player_id);return{id:r.id,time:r.created_at,completedAt:r.created_at,court:m?.court_id?((courts.data||[]).find(x=>x.id===m.court_id)?.court_number||1):1,categoryId:c?.id||m?.category_id,category:c?.name||'',round:m?.round||1,match:m?.match_number||1,blue:bp?.name||m?.blue_player_id||'',red:rp?.name||m?.red_player_id||'',blueScore:Number(r.blue_score)||0,redScore:Number(r.red_score)||0,winner:r.winner_player_id||'',winnerSide:r.winner_player_id===m?.blue_player_id?'BLUE':'RED',blueFouls:r.blue_fouls||0,redFouls:r.red_fouls||0,blueDisarms:r.blue_disarms||0,redDisarms:r.red_disarms||0,roundScores:m?.metadata?.roundScores||[],official:'Scoreboard',finished:true};});
-      const judgeById=new Map((judges.data||[]).map(j=>[j.id,j]));const scoreByPerf=new Map();(perfScores.data||[]).forEach(s=>{if(!scoreByPerf.has(s.performance_id))scoreByPerf.set(s.performance_id,[]);scoreByPerf.get(s.performance_id).push(s)});const dedByPerf=new Map();(perfDeductions.data||[]).forEach(d=>{if(!dedByPerf.has(d.performance_id))dedByPerf.set(d.performance_id,[]);dedByPerf.get(d.performance_id).push(d)});const localAnyo=(perfs.data||[]).map(p=>{const ss=(scoreByPerf.get(p.id)||[]).sort((a,b)=>Number(judgeById.get(a.judge_id)?.judge_number||0)-Number(judgeById.get(b.judge_id)?.judge_number||0)).map(s=>Number(s.score));const ds=dedByPerf.get(p.id)||[];const deductions={tv:0,dv:0,lv:0,fp:0};ds.forEach(d=>{const k=d.violation_type==='TIME'?'tv':d.violation_type==='DISARM'?'dv':d.violation_type==='OUT_OF_MAT'?'lv':'fp';deductions[k]=(deductions[k]||0)+Number(d.quantity||0)});return{id:p.id,time:p.created_at,finishedAt:p.finished_at,finished:p.finished,categoryId:p.category_id,categoryName:categoryLocal.find(c=>c.id===p.category_id)?.name||'',competitorType:'entry',competitorId:p.entry_id||p.id,entryId:p.entry_id||p.id,judgeCount:p.judge_count,rawTotal:Number(p.raw_total)||0,dropped:p.dropped_scores||[],keptTotal:Number(p.kept_total)||0,average:Number(p.average)||0,judgeAverage:Number(p.judge_average)||0,finalScore:Number(p.final_score)||0,deductions,deductionRates:p.deduction_rates||{},totalDeduction:Number(p.total_deduction)||0,scores:ss,elapsedMs:Number(p.elapsed_ms)||0,elapsedTime:p.elapsed_time||'',performerIndex:Number(p.performer_index)||0};});
+      const judgeById=new Map((judges.data||[]).map(j=>[j.id,j]));const scoreByPerf=new Map();(perfScores.data||[]).forEach(s=>{if(!scoreByPerf.has(s.performance_id))scoreByPerf.set(s.performance_id,[]);scoreByPerf.get(s.performance_id).push(s)});const dedByPerf=new Map();(perfDeductions.data||[]).forEach(d=>{if(!dedByPerf.has(d.performance_id))dedByPerf.set(d.performance_id,[]);dedByPerf.get(d.performance_id).push(d)});const localAnyo=(perfs.data||[]).map(p=>{const ss=(scoreByPerf.get(p.id)||[]).sort((a,b)=>Number(judgeById.get(a.judge_id)?.judge_number||0)-Number(judgeById.get(b.judge_id)?.judge_number||0)).map(s=>Number(s.score));const ds=dedByPerf.get(p.id)||[];const deductions={tv:0,dv:0,lv:0,fp:0};ds.forEach(d=>{const k=d.violation_type==='TIME'?'tv':d.violation_type==='DISARM'?'dv':d.violation_type==='OUT_OF_MAT'?'lv':'fp';deductions[k]=(deductions[k]||0)+Number(d.quantity||0)});return{id:p.id,time:p.created_at,finishedAt:p.finished_at,finished:p.finished,attemptNumber:Math.max(1,Number(p.attempt_number)||1),categoryId:p.category_id,categoryName:categoryLocal.find(c=>c.id===p.category_id)?.name||'',competitorType:'entry',competitorId:p.entry_id||p.id,entryId:p.entry_id||p.id,judgeCount:p.judge_count,rawTotal:Number(p.raw_total)||0,dropped:p.dropped_scores||[],keptTotal:Number(p.kept_total)||0,average:Number(p.average)||0,judgeAverage:Number(p.judge_average)||0,finalScore:Number(p.final_score)||0,deductions,deductionRates:p.deduction_rates||{},totalDeduction:Number(p.total_deduction)||0,scores:ss,elapsedMs:Number(p.elapsed_ms)||0,elapsedTime:p.elapsed_time||'',performerIndex:Number(p.performer_index)||0};});
       const localMedals=(medals.data||[]).map(m=>({id:m.id,categoryId:m.category_id,entryId:m.entry_id||'',playerId:m.player_id||'',teamId:m.team_id||'',medal:m.medal,source:m.source,score:Number(m.score)||0,awardedAt:m.awarded_at}));const localWi={};(weighins.data||[]).forEach(w=>{localWi[String(w.category_id)+'|'+String(w.player_id)]={id:w.id,categoryId:w.category_id,weight:Number(w.weight)||0,verified:!!w.verified,verifiedAt:w.verified_at,updatedAt:w.updated_at}});const localAudit=(audit.data||[]).map(a=>({id:a.id,time:a.created_at,action:a.action,detail:a.new_value?.detail||'',entityType:a.entity_type,entityId:a.entity_id,oldValue:a.old_value,newValue:a.new_value}));const membersByEntry=new Map();(anyoEntryMembers.data||[]).forEach(m=>{if(!membersByEntry.has(m.entry_id))membersByEntry.set(m.entry_id,[]);membersByEntry.get(m.entry_id).push(m)});const localEntries=(anyoEntries.data||[]).map(e=>({id:e.id,number:e.entry_number||'',type:e.entry_type,categoryId:e.category_id,style:e.style,weapon:e.weapon,groupReference:e.group_reference||'',status:e.status,drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,drawType:e.draw_type||null,drawnAt:e.drawn_at||null,memberIds:(membersByEntry.get(e.id)||[]).sort((a,b)=>a.member_position-b.member_position).map(m=>m.player_id)}));
       const localRegistrations=(registrations.data||[]).map(r=>({id:r.id,teamId:r.team_id||'',playerId:r.player_id||'',categoryId:r.category_id||'',anyoEntryId:r.anyo_entry_id||null,status:String(r.status||'ACTIVE').toUpperCase(),feeAmount:Number(r.fee_amount)||0,registeredAt:r.registered_at||null,updatedAt:r.updated_at||null}));const incoming={version:16,tournamentId:id,storageNamespace:null,setup,teams:localTeams,players:localPlayers,categories:categoryLocal,registrations:localRegistrations,results:localResults,medals:localMedals,audit:localAudit,activeCategory:row.settings?.activeCategory||null,locked:!!row.settings?.locked,anyoResults:localAnyo,weighIns:localWi,anyoEntries:localEntries};this.setId(id);
 
@@ -532,7 +580,7 @@ window.__RADIUM_SET_DATA(
   {fromCloud:true}
 );this.state.lastSync=row.updated_at||new Date().toISOString();this.state.tournamentId=id;this.state.assignedStatus=String(row.status||'').toLowerCase();this.state.loaded=true;document.body.classList.toggle('locked',String(row.status||'').toLowerCase()==='active' || !!incoming.locked);this.state.lastError=null;this.setStatus('TOURNAMENT DATA LOADED',true);try{window.renderAll?.();}catch(renderErr){console.error('RADIUM render after cloud load failed; cloud data remains loaded:',renderErr);}return true;
     }catch(e){this.state.lastError=e;this.setStatus('LOAD ERROR',false,'The tournament data could not be loaded: '+this.errorText(e));console.error('RADIUM cloud pull failed:',e);return false}},
-    scheduleSync(){if(!window.RADIUM_AUTH?.user||!this.getId())return;this.state.dirty=true;clearTimeout(timer);timer=setTimeout(()=>this.push(),700)},
+    scheduleSync(){if(!window.RADIUM_AUTH?.user||!this.getId())return;changeVersion++;this.state.dirty=true;if(syncing||startingPush||categoryDeleteInProgress){syncAgain=true;return;}clearTimeout(timer);timer=setTimeout(()=>{if(syncing||startingPush||categoryDeleteInProgress){syncAgain=true;return;}this.push();},350)},
     async saveNow(overridePayload=null){
       clearTimeout(timer);
       timer=null;
@@ -598,7 +646,8 @@ window.__RADIUM_SET_DATA(
       if(id){try{await this.pull();return}catch(e){this.clearId();this.state.lastError=e;}}
       try{
         const rows=await this.listTournaments();
-        const unfinished=rows.filter(r=>['draft','active'].includes(String(r.status||'').toLowerCase())).sort((a,b)=>String(b.updated_at).localeCompare(String(a.updated_at)));
+        const safeRows=Array.isArray(rows)?rows:[];
+        const unfinished=safeRows.filter(r=>r&&['draft','active'].includes(String(r.status||'').toLowerCase())).sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
         if(unfinished.length){
           id=unfinished[0].id;
           this.setId(id);
@@ -611,7 +660,17 @@ window.__RADIUM_SET_DATA(
       }catch(e){this.state.lastError=e;this.setStatus('TOURNAMENT LOOKUP ERROR',false,this.errorText(e));return}
       this.setStatus('READY FOR NEW TOURNAMENT',true);
     },
-    async listTournaments(){if(!(await this.init()))throw new Error('Supabase is not configured or could not initialize.');const r=await window.RADIUM_DB.select('tournaments',{select:'id,name,venue,event_date,organizer,status,settings,created_at,updated_at',order:{column:'created_at',ascending:false}});if(r.error)throw r.error;return Array.isArray(r.data)?r.data:[]},
+    async listTournaments(){
+      if(!(await this.init()))throw this.state.lastError||new Error('Supabase is not configured or could not initialize.');
+      const r=await window.RADIUM_DB.select('tournaments',{select:'id,name,venue,event_date,organizer,status,settings,created_at,updated_at',order:{column:'created_at',ascending:false}});
+      if(!r)throw new Error('Tournament lookup returned no response from Supabase.');
+      if(r.error)throw r.error;
+      if(!Array.isArray(r.data)){
+        console.warn('RADIUM tournament lookup returned a non-array payload:',r.data);
+        return [];
+      }
+      return r.data;
+    },
     async loadTournament(id){
       if(!(await this.init()))throw new Error('Supabase is not configured or could not initialize.');
       this.setId(id);
@@ -731,11 +790,11 @@ window.__RADIUM_SET_DATA(
 },
     async deleteTournament(id){if(!(await this.init()))throw new Error('Supabase is not configured.');if(role()!=='admin')throw new Error('Admin account required.');const r=await window.RADIUM_DB.remove('tournaments',{id});if(r.error)throw r.error;if(String(this.getId())===String(id))this.clearId();return true},
     async deleteAllTournaments(){if(!(await this.init()))throw new Error('Supabase is not configured.');if(role()!=='admin')throw new Error('Admin account required.');for(const row of await this.listTournaments()){const r=await window.RADIUM_DB.remove('tournaments',{id:row.id});if(r.error)throw r.error}this.clearId();return true},
-    async saveAnyoPerformance(payload){if(!(await this.init()))throw new Error('Supabase is not configured.');const tid=this.getId();if(!tid)throw new Error('No active tournament selected.');if(!payload?.categoryId||!(payload?.entryId||payload?.competitorId))throw new Error('Anyo performance context is incomplete.');const p=JSON.parse(JSON.stringify(payload));p.entryId=p.entryId||p.competitorId;p.competitorId=p.entryId;p.performerIndex=Number(p.performerIndex)||0;const r=await window.RADIUM_DB.rpc('radium_save_anyo_performance',{p_tournament_id:tid,p_payload:p});if(r.error)throw r.error;const row=Array.isArray(r.data)?r.data[0]:r.data;if(row?.id)p.id=row.id;return p},
+    async saveAnyoPerformance(payload){if(!(await this.init()))throw new Error('Supabase is not configured.');const tid=this.getId();if(!tid)throw new Error('No active tournament selected.');if(!payload?.categoryId||!(payload?.entryId||payload?.competitorId))throw new Error('Anyo performance context is incomplete.');const p=JSON.parse(JSON.stringify(payload));p.entryId=p.entryId||p.competitorId;p.competitorId=p.entryId;p.performerIndex=Number(p.performerIndex)||0;const r=await window.RADIUM_DB.rpc('radium_save_anyo_performance',{p_tournament_id:tid,p_payload:p});if(r.error)throw r.error;const row=Array.isArray(r.data)?r.data[0]:r.data;if(row?.id)p.id=row.id;if(row?.attempt_number!=null)p.attemptNumber=Number(row.attempt_number);return p},
     async unfinishAnyoPerformance(categoryId,type,competitorId){if(!(await this.init()))throw new Error('Supabase is not configured.');const q={entry_id:competitorId,category_id:categoryId};const r=await window.RADIUM_DB.remove('anyo_performances',q);if(r.error)throw r.error;return true}
   };
   function eligibleForCategory(p,c){const age=Number(p.age);if(!Number.isFinite(age)||age<Number(c.ageFrom)||age>Number(c.ageTo))return false;if(c.sex&&c.sex!=='Mixed'&&c.sex!==p.sex)return false;if(c.event==='Arnis Anyo'){const e=p.events||{};const type=c.anyoType||'Individual';if(type==='Individual'&&!e.anyoIndividual)return false;if(type==='Synchronized'&&!e.anyoTeam)return false;if(type==='Mixed')return false;const combos=type==='Individual'?(Array.isArray(e.anyoIndividualEvents)?e.anyoIndividualEvents:[]):(Array.isArray(e.anyoSynchronizedEvents)?e.anyoSynchronizedEvents:[]);const style=c.anyoStyle||'Traditional';const wanted=`${style}|${c.anyoWeapon||'Any'}`;if(c.anyoWeapon&&c.anyoWeapon!=='Any'){if(combos.length&&!combos.includes(wanted))return false;const key=style==='Traditional'?'anyoTraditionalWeapons':'anyoNonTraditionalWeapons';const legacy=Array.isArray(e[key])?e[key]:[];if(!combos.length&&!legacy.includes(c.anyoWeapon))return false;}return true}if(c.event==='Livestick'&&!p.events?.livestick)return false;if(c.event!=='Arnis Anyo'&&p.events?.combat===false)return false;const w=Number(p.weight);return Number.isFinite(w)&&w>=Number(c.weightFrom||0)&&w<=Number(c.weightTo||999)}
-  async function cleanupTop(table,ids,tid,db,fail){const r=await db.select(table,{select:'id',eq:{tournament_id:tid}});await fail(table+' cleanup read',r);for(const old of r.data||[])if(!ids.has(old.id))await fail(table+' stale cleanup',await db.remove(table,{id:old.id}))}
+  async function cleanupTop(table,ids,tid,db,fail){const r=await db.select(table,{select:'id',eq:{tournament_id:tid}});await fail(table+' cleanup read',r);const stale=(r.data||[]).filter(old=>!ids.has(old.id)).map(old=>old.id);if(stale.length){if(typeof db.removeIn==='function')await fail(table+' stale cleanup',await db.removeIn(table,'id',stale,{tournament_id:tid}));else for(const id of stale)await fail(table+' stale cleanup',await db.remove(table,{id,tournament_id:tid}));}}
   window.RADIUM_CLOUD=cloud;
   function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
   function updateTournamentIdBadge(id){
