@@ -19,28 +19,14 @@
   }
   function categories(){const d=state();return d?(d.categories||[]).filter(c=>isDepEdTournament()&&(isAnyo(c)||isCombative(c))):[];}
   function categoryDivision(c){
-    // Anyo school level comes from the explicit category preset/level.
-    // Do not use age because Elementary 1-13 and Secondary 1-18 overlap.
+    // DepEd-PEKAF Combative is a secondary/high-school-only event.
+    // Do not infer its division from the category name because the official
+    // category names (e.g. Boys 12–17 / weight classes) do not contain
+    // the word "Secondary". Anyo categories still use their explicit
+    // Elementary/Secondary naming.
     if(isDepEdTournament() && isCombative(c)) return 'Secondary';
-    const preset=String(c?.preset||'').toUpperCase();
-    const level=String(c?.school_level||c?.level||'').toLowerCase();
-    if(preset.includes('ELEMENTARY')||level==='elementary')return 'Elementary';
-    if(preset.includes('SECONDARY')||level==='secondary')return 'Secondary';
     const n=String(c?.name||'').toLowerCase();
     return n.includes('secondary')?'Secondary':'Elementary';
-  }
-  function secondaryAnyoDuplicateOfElementary(entry,c,d){
-    if(categoryDivision(c)!=='Secondary')return false;
-    const ids=(entry?.memberIds||[]).map(String).filter(Boolean);
-    if(!ids.length)return false;
-    const elementaryCats=(d.categories||[]).filter(x=>isAnyo(x)&&categoryDivision(x)==='Elementary');
-    const elementaryIds=new Set(elementaryCats.map(x=>String(x.id)));
-    const elementaryMax=Math.max(0,...elementaryCats.map(x=>Number(x.ageTo??x.age_max)).filter(Number.isFinite));
-    if(!elementaryIds.size||!elementaryMax)return false;
-    const entries=(d.anyoEntries||[]);
-    const hasElementary=entries.some(other=>String(other.id)!==String(entry.id)&&elementaryIds.has(String(other.categoryId))&&!['deleted','withdrawn'].includes(String(other.status||'').toLowerCase())&&ids.some(id=>(other.memberIds||[]).map(String).includes(id)));
-    if(!hasElementary)return false;
-    return ids.some(id=>{const p=(d.players||[]).find(x=>String(x.id)===id);return p&&Number.isFinite(Number(p.age))&&Number(p.age)<=elementaryMax;});
   }
   function weaponRank(c){return ({'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3})[String(c?.weapon||'')]||99;}
   function sortedCategories(list){return [...list].sort((a,b)=>{const da=categoryDivision(a),db=categoryDivision(b);if(da!==db)return da==='Elementary'?-1:1;const wa=weaponRank(a),wb=weaponRank(b);if(wa!==wb)return wa-wb;return String(a.name||'').localeCompare(String(b.name||''));});}
@@ -50,32 +36,17 @@
     const d=state();if(!d||!c)return [];
     if(isAnyo(c)){
       if((c.anyoType||'Individual')==='Individual'){
-        // ANYO roster is authoritative from the actual anyo_entries registration.
-        // Do NOT depend on players.events.anyoIndividual: that legacy flag can be
-        // missing even when the athlete is correctly registered in this category.
         const rows=[];
-        const seenPlayers=new Set();
-        const entries=(d.anyoEntries||[]).filter(e=>
-          String(e.categoryId)===String(c.id) &&
-          String(e.type||e.entryType||'Individual')==='Individual' &&
-          !['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())
-        );
-        for(const e of entries){
-          const pid=(e.memberIds||[]).map(String).find(Boolean);
-          if(!pid||seenPlayers.has(pid))continue;
-          const p=(d.players||[]).find(x=>String(x.id)===pid);
-          if(!p||!eligible(p,c))continue;
-          // If an athlete has an Elementary registration and a duplicate
-          // Secondary registration, keep the Elementary registration and do not
-          // put the duplicate into the Secondary draw.
-          if(secondaryAnyoDuplicateOfElementary(e,c,d))continue;
-          seenPlayers.add(pid);
+        for(const p of d.players||[]){
+          if(!eligible(p,c)||p.events?.anyoIndividual!==true)continue;
+          let e=(d.anyoEntries||[]).find(x=>String(x.categoryId)===String(c.id)&&x.type==='Individual'&&x.memberIds?.[0]===p.id&&x.status!=='deleted');
+          if(!e)e={id:`tmp-${c.id}-${p.id}`,memberIds:[p.id],number:p.number||p.id};
           const cs=p.categorySeeds?.[c.id]||{};
           rows.push({kind:'player',id:p.id,name:p.name,teamId:p.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):(Number.isFinite(Number(cs.drawNumber))?Number(cs.drawNumber):null),player:p,entry:e});
         }
         return rows;
       }
-      return (d.anyoEntries||[]).filter(e=>String(e.categoryId)===String(c.id)&&e.type===(c.anyoType||'Synchronized')&&!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())&&!secondaryAnyoDuplicateOfElementary(e,c,d)).map(e=>({kind:'entry',id:e.id,name:e.number||e.id,teamId:(e.memberIds||[]).map(id=>(d.players||[]).find(p=>String(p.id)===String(id))).find(Boolean)?.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):null,entry:e}));
+      return (d.anyoEntries||[]).filter(e=>String(e.categoryId)===String(c.id)&&e.type===(c.anyoType||'Synchronized')&&e.status!=='deleted').map(e=>({kind:'entry',id:e.id,name:e.number||e.id,teamId:(e.memberIds||[]).map(id=>(d.players||[]).find(p=>String(p.id)===String(id))).find(Boolean)?.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):null,entry:e}));
     }
     // Combative draw lots must use the same authoritative roster as the bracket:
     // active category registration + verified weigh-in. This makes the saved seed
