@@ -11,7 +11,7 @@ body{overflow:auto}.top{position:sticky;top:0;z-index:20;background:rgba(5,13,23
 .toprow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.brandrow{display:flex;align-items:center;gap:12px}.brand-logo{width:52px;height:52px;object-fit:contain;border-radius:50%;background:#fff;padding:2px}.brand{font-size:20px;font-weight:900;letter-spacing:.8px}.sub{font-size:12px;color:#c3d2e4}.status{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:11px;font-weight:900}.dot{width:9px;height:9px;border-radius:50%;background:#f3aa18}.dot.ok{background:#16c66a}.dot.bad{background:#e63b47}
 .controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px}.controls select,.controls button{height:40px;border-radius:7px;border:1px solid #3a5878;font:inherit}.controls select{min-width:290px;background:#fff;color:#172033;padding:0 10px}.controls button{background:var(--accent2);color:#fff;padding:0 13px;font-weight:900;cursor:pointer}.controls button.secondary{background:#fff;color:#102a45}.controls button.warn{background:#f0a51a;color:#111}.controls button.danger{background:#d93649;color:#fff}.controls button.success{background:#16a86a;color:#fff}.controls button:disabled{opacity:.45;cursor:not-allowed}.control-note{font-size:10px;color:#9fb0c5;margin-top:6px}.meta{font-size:11px;color:#aabbd0;margin-top:8px;min-height:14px}
 .main{padding:18px;max-width:2400px;margin:auto}.notice{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 16px;box-shadow:var(--shadow);margin-bottom:14px;color:#dfe9f5}.notice.error{border-left:5px solid var(--red)}.notice.ok{border-left:5px solid var(--green)}
-.bracket-wrap{position:relative;background:rgba(10,24,40,.9);border:1px solid #28425e;border-radius:12px;box-shadow:var(--shadow);padding:16px;overflow:auto;min-height:520px}.bracket{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(225px,1fr);gap:64px;align-items:start;min-width:max-content;padding:8px 18px 36px}.round{width:225px;position:relative;z-index:2}.round h3{text-align:center;margin:0 0 14px;background:linear-gradient(135deg,#183958,#0e2239);color:#fff;border:1px solid #365777;border-radius:7px;padding:9px;font-size:12px;letter-spacing:.6px}.matches{position:relative;display:flex;flex-direction:column;min-height:120px}.match{width:225px;background:var(--panel2);border:1px solid #38526e;border-radius:8px;box-shadow:0 5px 14px rgba(0,0,0,.28);overflow:hidden;position:relative;cursor:pointer;transition:.15s transform,.15s border-color,.15s box-shadow}.match:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 8px 22px rgba(0,0,0,.4)}.match-label{font-size:9px;font-weight:900;color:#b8c9dc;background:#0a1828;border-bottom:1px solid #29425c;padding:6px 8px}.fighter{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:9px 9px;border-left:5px solid #718198;min-height:40px}.fighter.red{border-left-color:var(--red)}.fighter.blue{border-left-color:var(--blue)}.fighter.winner{background:rgba(32,199,122,.14)}.fighter.waiting{color:#718198;background:#0a1523}.fighter-name{font-weight:900;font-size:12px;line-height:1.12}.fighter-meta{display:block;font-size:8px;color:#91a4ba;margin-top:3px;font-weight:500}.score{font-weight:900;font-size:13px;min-width:22px;text-align:right}.vs{font-size:8px;text-align:center;color:#7f92aa;background:#091625;border-top:1px solid #1d334a;border-bottom:1px solid #1d334a;padding:2px}.state{padding:6px 9px;background:#0a1828;color:#8497ad;border-top:1px solid #29425c;font-size:8px;font-weight:900;text-transform:uppercase}.state.done{color:#4ce69b;background:#09251a}.state.bye{color:#f4ce58;background:#2b2208}.match.startable{outline:1px solid rgba(245,181,27,.45)}.match.flow-next{outline:3px solid var(--accent);box-shadow:0 0 0 2px rgba(245,181,27,.2),0 10px 28px rgba(245,181,27,.18)}.match.flow-next .match-label:after{content:' • NEXT IN MATCH FLOW';color:#ffd45b;font-weight:900}.match.startable .state{color:#ffd45b}.bye-entry{width:225px;min-height:52px;display:flex;align-items:center;gap:8px;padding:9px;border:1px dashed #20c77a;border-radius:8px;background:#09251a;color:#eaf8f0}.bye-tag{padding:4px 7px;border-radius:4px;background:#20c77a;color:#062014;font-size:9px;font-weight:900}.bye-entry b{font-size:12px}.bye-entry small{margin-left:auto;color:#4ce69b;font-size:8px;font-weight:900}
+.bracket-wrap{position:relative;background:rgba(10,24,40,.9);border:1px solid #28425e;border-radius:12px;box-shadow:var(--shadow);padding:16px;overflow:auto;min-height:520px}.bracket{position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(225px,1fr);gap:64px;align-items:start;min-width:max-content;padding:8px 18px 36px}.round{width:225px;position:relative;z-index:2}.round h3{text-align:center;margin:0 0 14px;background:linear-gradient(135deg,#183958,#0e2239);color:#fff;border:1px solid #365777;border-radius:7px;padding:9px;font-size:12px;letter-spacing:.6px}.matches{position:relative;display:flex;flex-direction:column;min-height:120px}.match{width:225px;background:var(--panel2);border:1px solid #38526e;border-radius:8px;box-shadow:0 5px 14px rgba(0,0,0,.28);overflow:hidden;position:relative;cursor:pointer;transition:.15s transform,.15s border-color,.15s box-shadow}.match:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 8px 22px rgba(0,0,0,.4)}.match-label{font-size:9px;font-weight:900;color:#b8c9dc;background:#0a1828;border-bottom:1px solid #29425c;padding:6px 8px}.fighter{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:9px 9px;border-left:5px solid #718198;min-height:40px}.fighter.red{border-left-color:var(--red)}.fighter.blue{border-left-color:var(--blue)}.fighter.winner{background:rgba(32,199,122,.14)}.fighter.waiting{color:#718198;background:#0a1523}.fighter-name{font-weight:900;font-size:12px;line-height:1.12}.fighter-meta{display:block;font-size:8px;color:#91a4ba;margin-top:3px;font-weight:500}.score{font-weight:900;font-size:13px;min-width:22px;text-align:right}.vs{font-size:8px;text-align:center;color:#7f92aa;background:#091625;border-top:1px solid #1d334a;border-bottom:1px solid #1d334a;padding:2px}.state{padding:6px 9px;background:#0a1828;color:#8497ad;border-top:1px solid #29425c;font-size:8px;font-weight:900;text-transform:uppercase}.state.done{color:#4ce69b;background:#09251a}.state.bye{color:#f4ce58;background:#2b2208}.match.startable{outline:1px solid rgba(245,181,27,.45)}.match.startable .state{color:#ffd45b}.bye-entry{width:225px;min-height:52px;display:flex;align-items:center;gap:8px;padding:9px;border:1px dashed #20c77a;border-radius:8px;background:#09251a;color:#eaf8f0}.bye-tag{padding:4px 7px;border-radius:4px;background:#20c77a;color:#062014;font-size:9px;font-weight:900}.bye-entry b{font-size:12px}.bye-entry small{margin-left:auto;color:#4ce69b;font-size:8px;font-weight:900}
 .champion{width:225px;align-self:center;background:linear-gradient(135deg,#11965b,#087044);color:#fff;border:1px solid #4be29a;border-radius:9px;padding:18px;text-align:center;box-shadow:var(--shadow)}.champion small{display:block;font-size:9px;letter-spacing:1px;opacity:.85}.champion b{display:block;font-size:20px;margin-top:7px}.empty{padding:45px 20px;text-align:center;color:var(--muted)}
 .tree-lines{position:absolute;inset:0;pointer-events:none;z-index:1;overflow:visible}.tree-lines path{fill:none;stroke:#5d7896;stroke-width:2;opacity:.75}.tree-lines path.active{stroke:var(--accent);stroke-width:2.5;opacity:1}
 #printHeader{display:none}
@@ -30,6 +30,7 @@ body{overflow:auto}.top{position:sticky;top:0;z-index:20;background:rgba(5,13,23
  .matches{min-height:0}.match{width:100%;border:1px solid #444;box-shadow:none;border-radius:2mm;cursor:default}.match-label{font-size:5.5pt;padding:1.2mm 1.5mm}.fighter{min-height:0;padding:1.8mm 1.5mm;border-left-width:3px}.fighter-name{font-size:7pt}.fighter-meta{font-size:5pt}.score{font-size:7pt}.vs{font-size:5pt;padding:.4mm}.state{font-size:5pt;padding:1.2mm 1.5mm}.champion{width:100%;padding:3mm;border:1px solid #333;box-shadow:none}.champion b{font-size:11pt}.tree-lines{display:none}
  .round:nth-child(1) .matches{gap:2.5mm}.round:nth-child(2) .matches{padding-top:8mm;gap:18mm}.round:nth-child(3) .matches{padding-top:24mm;gap:45mm}.round:nth-child(4) .matches{padding-top:55mm;gap:98mm}.round:nth-child(5) .matches{padding-top:120mm}
 }
+.live-flow-note{margin:8px 0 12px;padding:9px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font-size:12px;color:#334155}.flow-next{outline:3px solid #f5b700;outline-offset:2px}.flow-rank{display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;background:#071a35;color:#fff;font-size:9px;font-weight:900;letter-spacing:.3px}.flow-waiting{opacity:.72}
 </style>
 </head>
 <body>
@@ -47,7 +48,7 @@ body{overflow:auto}.top{position:sticky;top:0;z-index:20;background:rgba(5,13,23
   <div class="meta" id="meta">This display reads the official tournament data.</div><div class="control-note" id="controlNote">LIVE MODE • Select a category, open any READY match, score it, and the winner will advance. Bracket generation, regeneration, seeding and locking are managed only from Admin → Brackets.</div>
 </header>
 <main class="main"><div id="printHeader" style="display:none"><img src="Logo1.webp" alt="RADIUM Logo"><div><strong id="printTournament"></strong><span id="printCategory"></span></div></div>
-  <div id="notice" class="notice">Loading tournament…</div>
+  <div id="notice" class="notice">Loading tournament…</div><div id="flowNote" class="live-flow-note">Loading saved Match Flow…</div>
   <div class="bracket-wrap"><svg id="treeLines" class="tree-lines" aria-hidden="true"></svg><div id="bracket" class="bracket"><div class="empty">Waiting for tournament data…</div></div></div>
 </main>
 <script src="db/supabase-config.js"></script>
@@ -55,10 +56,10 @@ body{overflow:auto}.top{position:sticky;top:0;z-index:20;background:rgba(5,13,23
 (function(){
 'use strict';
 const cfg=window.RADIUM_SUPABASE_CONFIG||{};
-let client=null,row=null,selectedId='',timer=null,channel=null;
+let client=null,row=null,selectedId='',channel=null,realtimeLoadTimer=null;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const params=new URLSearchParams(location.search); const requestedId=params.get('tournament')||params.get('tournament_id')||''; const requestedCategory=params.get('category')||params.get('category_id')||''; const requestedRole=String(params.get('role')||'').toUpperCase(); selectedId=requestedCategory;let flowManualSelection=!!requestedCategory;
+const params=new URLSearchParams(location.search); const requestedId=params.get('tournament')||params.get('tournament_id')||''; const requestedCategory=params.get('category')||params.get('category_id')||''; const requestedRole=String(params.get('role')||'').toUpperCase(); selectedId=requestedCategory;
 function setStatus(ok,text){$('statusDot').className='dot '+(ok?'ok':'bad');$('statusText').textContent=text}
 function setNotice(text,kind=''){const n=$('notice');n.className='notice '+kind;n.textContent=text}
 function playerMap(settings){const m=new Map();(settings?.players||[]).forEach(p=>m.set(String(p.id),p));return m}
@@ -66,14 +67,8 @@ function teamMap(settings){const m=new Map();(settings?.teams||[]).forEach(t=>m.
 function nameFor(id,pm){if(!id)return 'WAITING';const p=pm.get(String(id));return p?.name||String(id)}
 function metaFor(id,pm,tm){const p=pm.get(String(id));if(!p)return '';const t=p.teamId?tm.get(String(p.teamId))?.name:'';return [t,p.seed?'SEED '+p.seed:''].filter(Boolean).join(' • ')}
 function roundName(i,total){const n=total-i;if(n===1)return 'FINAL';if(n===2)return 'SEMIFINAL';if(n===3)return 'QUARTERFINAL';if(n===4)return 'ROUND OF 16';return 'ROUND '+(i+1)}
-function matchFlowSexRank(c,flow){const sex=String(c?.sex||c?.gender||'Mixed').toLowerCase();if(flow==='BOYS_FIRST'||flow==='ROUND_BOYS_FIRST')return sex==='male'||sex==='boys'?0:sex==='female'||sex==='girls'?1:2;if(flow==='GIRLS_FIRST'||flow==='ROUND_GIRLS_FIRST')return sex==='female'||sex==='girls'?0:sex==='male'||sex==='boys'?1:2;return 0;}
-function matchFlowCategoryRank(c){const n=String(c?.name||'').toLowerCase().replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();if(/\bpinweight\b/.test(n))return 0;if(/\bbantamweight\b|\bbantam\b/.test(n))return 1;if(/\bfeatherweight\b|\bfeather\b/.test(n))return 2;if(/\bextra\s*lightweight\b|\bextra\s*light\s*weight\b/.test(n))return 3;if(/\bhalf\s*lightweight\b|\bhalf\s*light\s*weight\b/.test(n))return 4;if(/\bespada\s*y\s*daga\b/.test(n))return 12;if(/\bdouble\s+weapon\b/.test(n))return 11;if(/\bsingle\s+weapon\b/.test(n))return 10;return 100;}
-function matchFlowCompareRows(rows,flow){const f=String(flow||'ROUND_CATEGORY').toUpperCase();return (rows||[]).slice().sort((a,b)=>{const ca=a?.c||{},cb=b?.c||{};const sa=matchFlowSexRank(ca,f),sb=matchFlowSexRank(cb,f);const ra=Number(a?.ri)||0,rb=Number(b?.ri)||0,ma=Number(a?.mi)||0,mb=Number(b?.mi)||0,ka=matchFlowCategoryRank(ca),kb=matchFlowCategoryRank(cb),na=String(ca?.name||''),nb=String(cb?.name||'');if(f==='BOYS_FIRST'||f==='GIRLS_FIRST')return sa-sb||ka-kb||na.localeCompare(nb)||ra-rb||ma-mb;if(f==='ROUND_BOYS_FIRST'||f==='ROUND_GIRLS_FIRST')return ra-rb||sa-sb||ka-kb||na.localeCompare(nb)||ma-mb;return ra-rb||ka-kb||na.localeCompare(nb)||sa-sb||ma-mb;});}
-function liveFlowRows(settings){const rows=[];for(const c of (settings?.categories||[])){if(!c||c.event==='Arnis Anyo'||!c.bracket?.rounds)continue;for(const [ri,round] of c.bracket.rounds.entries())for(const [mi,m] of (round||[]).entries())if(m)rows.push({c,ri,mi,m});}return rows;}
-function liveOrderedReady(settings){const flow=String(settings?.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase();const rows=liveFlowRows(settings);const ready=rows.filter(x=>x.m&&!x.m.completed&&x.m.red&&x.m.blue);if(!ready.length)return [];if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){const unfinished=rows.filter(x=>x.m&&!x.m.completed&&x.m.red&&x.m.blue);if(!unfinished.length)return [];const minRound=Math.min(...unfinished.map(x=>Number(x.ri)||0));return matchFlowCompareRows(ready.filter(x=>(Number(x.ri)||0)===minRound),flow);}return matchFlowCompareRows(ready,flow);}
-function flowSortedCategories(cats,flow){return [...(cats||[])].sort((a,b)=>{const sa=matchFlowSexRank(a,flow),sb=matchFlowSexRank(b,flow),ka=matchFlowCategoryRank(a),kb=matchFlowCategoryRank(b);return (flow==='BOYS_FIRST'||flow==='GIRLS_FIRST'?sa-sb||ka-kb:ka-kb||sa-sb)||String(a.name||'').localeCompare(String(b.name||''));});}
 function score(m,side){const bye=side==='red'?m.redBye:m.blueBye;if(bye)return '<span class="score">BYE</span>';if(!m.completed)return '';const v=side==='red'?m.redScore:m.blueScore;return '<span class="score">'+esc(v??'—')+'</span>'}
-function matchHtml(m,ri,mi,pm,tm,b){
+function matchHtml(m,ri,mi,pm,tm,b,flowRank){
   const red=m.red,blue=m.blue,w=m.winner;
   const redName=nameFor(red,pm),blueName=nameFor(blue,pm);
   const redMeta=metaFor(red,pm,tm),blueMeta=metaFor(blue,pm,tm);
@@ -81,8 +76,8 @@ function matchHtml(m,ri,mi,pm,tm,b){
   let state=done?(w?'RESULT CONFIRMED':'BYE ADVANCED'):(playable?'READY':'WAITING');
   if(bye)state='BYE ADVANCED';
   const label=b.mode==='roundrobin'?`ROUND ${ri+1} · GAME ${mi+1}`:`${roundName(ri,b.rounds.length)} · MATCH ${mi+1}`;
-  const clickable=!!(red&&blue&&!done);
-  return `<div class="match ${clickable?'startable':''}" role="button" tabindex="0" data-ri="${ri}" data-mi="${mi}" data-id="${esc(m.id||'')}"><div class="match-label">${ri===b.rounds.length-1?'🏆 ':''}${esc(label)}${clickable?' • TAP TO SCORE':''}</div><div class="fighter red ${w===red?'winner':''} ${!red?'waiting':''}"><div><div class="fighter-name">${esc(redName)}</div>${redMeta?`<small class="fighter-meta">${esc(redMeta)}</small>`:''}</div>${score(m,'red')}</div><div class="vs">VS</div><div class="fighter blue ${w===blue?'winner':''} ${!blue?'waiting':''}"><div><div class="fighter-name">${esc(blueName)}</div>${blueMeta?`<small class="fighter-meta">${esc(blueMeta)}</small>`:''}</div>${score(m,'blue')}</div><div class="state ${done?'done':''} ${bye?'bye':''}">${state}</div></div>`;
+  const clickable=!!(red&&blue&&!done);const flowClass=flowRank?' flow-next':' flow-waiting';const flowBadge=flowRank?`<span class="flow-rank">FLOW #${flowRank}</span>`:'';
+  return `<div class="match ${clickable?'startable':''}${!done&&red&&blue?flowClass:''}" role="button" tabindex="0" data-ri="${ri}" data-mi="${mi}" data-id="${esc(m.id||'')}"><div class="match-label">${ri===b.rounds.length-1?'🏆 ':''}${esc(label)}${flowBadge}${clickable?' • TAP TO SCORE':''}</div><div class="fighter red ${w===red?'winner':''} ${!red?'waiting':''}"><div><div class="fighter-name">${esc(redName)}</div>${redMeta?`<small class="fighter-meta">${esc(redMeta)}</small>`:''}</div>${score(m,'red')}</div><div class="vs">VS</div><div class="fighter blue ${w===blue?'winner':''} ${!blue?'waiting':''}"><div><div class="fighter-name">${esc(blueName)}</div>${blueMeta?`<small class="fighter-meta">${esc(blueMeta)}</small>`:''}</div>${score(m,'blue')}</div><div class="state ${done?'done':''} ${bye?'bye':''}">${state}</div></div>`;
 }
 function openScoreboard(ri,mi){
   const settings=tournamentSettings();
@@ -293,28 +288,29 @@ function clearCategoryResults(settings,categoryId){
   settings.results=Array.isArray(settings.results)?settings.results.filter(x=>String(x.categoryId)!==String(categoryId)):[];
   settings.medals=Array.isArray(settings.medals)?settings.medals.filter(x=>String(x.categoryId)!==String(categoryId)):[];
 }
+function matchFlowSexRank(c,flow){const sex=String(c?.sex||c?.gender||'Mixed').toLowerCase();if(flow==='BOYS_FIRST'||flow==='ROUND_BOYS_FIRST')return sex==='male'||sex==='boys'?0:sex==='female'||sex==='girls'?1:2;if(flow==='GIRLS_FIRST'||flow==='ROUND_GIRLS_FIRST')return sex==='female'||sex==='girls'?0:sex==='male'||sex==='boys'?1:2;return 0;}
+function matchFlowCategoryRank(c){const n=String(c?.name||'').toLowerCase().replace(/[–—]/g,'-').replace(/\s+/g,' ').trim();if(/\bpinweight\b/.test(n))return 0;if(/\bbantamweight\b|\bbantam\b/.test(n))return 1;if(/\bfeatherweight\b|\bfeather\b/.test(n))return 2;if(/\bextra\s*lightweight\b|\bextra\s*light\s*weight\b/.test(n))return 3;if(/\bhalf\s*lightweight\b|\bhalf\s*light\s*weight\b/.test(n))return 4;if(/\bespada\s*y\s*daga\b/.test(n))return 12;if(/\bdouble\s+weapon\b/.test(n))return 11;if(/\bsingle\s+weapon\b/.test(n))return 10;return 100+n.localeCompare(n);}
+function matchFlowOrderRows(rows,flow){const f=String(flow||'ROUND_CATEGORY').toUpperCase();return (rows||[]).slice().sort((a,b)=>{const ca=a.c||{},cb=b.c||{};const sa=matchFlowSexRank(ca,f),sb=matchFlowSexRank(cb,f),ra=(Number(a.ri)||0),rb=(Number(b.ri)||0),ma=(Number(a.mi)||0),mb=(Number(b.mi)||0),ka=matchFlowCategoryRank(ca),kb=matchFlowCategoryRank(cb),na=String(ca.name||''),nb=String(cb.name||'');if(f==='BOYS_FIRST'||f==='GIRLS_FIRST')return sa-sb||ka-kb||na.localeCompare(nb)||ra-rb||ma-mb;if(f==='ROUND_BOYS_FIRST'||f==='ROUND_GIRLS_FIRST')return ra-rb||sa-sb||ka-kb||na.localeCompare(nb)||ma-mb;return ra-rb||ka-kb||na.localeCompare(nb)||sa-sb||ma-mb;});}
+function liveFlowRows(settings){const flow=String(settings?.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase(),rows=[];for(const c of (settings.categories||[])){if(!c||c.event==='Arnis Anyo')continue;for(const [ri,r] of (c.bracket?.rounds||[]).entries())for(const [mi,m] of (r||[]).entries())if(m)rows.push({c,ri,mi,m});}const playable=rows.filter(x=>x.m.red&&x.m.blue&&!x.m.completed);if(!playable.length)return {flow,ordered:[],ready:[]};let ready=playable;if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){const minRound=Math.min(...playable.map(x=>Number(x.ri)||0));ready=playable.filter(x=>(Number(x.ri)||0)===minRound);}return {flow,ordered:matchFlowOrderRows(rows,flow),ready:matchFlowOrderRows(ready,flow)};}
+
 function render(){
   const settings=tournamentSettings();
   // Show every combat bracket category from Supabase, even before a bracket has
   // been generated. This keeps the browser bracket tab in sync with the Admin
   // Categories page instead of hiding newly-created categories.
   const cats=(Array.isArray(settings.categories)?settings.categories:[]).filter(c=>c&&c.event!=='Arnis Anyo');
-  const flow=String(settings.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase();
-  const orderedCats=flowSortedCategories(cats,flow);
-  const flowReady=liveOrderedReady(settings);
-  const flowNextCategory=flowReady[0]?.c?.id||orderedCats[0]?.id||'';
+  const flowInfo=liveFlowRows(settings), flow=flowInfo.flow, readyIds=new Map(flowInfo.ready.map((x,i)=>[String(x.m.id),i+1]));
+  cats.sort((a,b)=>{const f=flow,sa=matchFlowSexRank(a,f),sb=matchFlowSexRank(b,f),ka=matchFlowCategoryRank(a),kb=matchFlowCategoryRank(b);return (f==='BOYS_FIRST'||f==='GIRLS_FIRST'?sa-sb||ka-kb:ka-kb||sa-sb)||String(a.name||'').localeCompare(String(b.name||''));});
   const select=$('categorySelect'); const old=selectedId||select.value||new URLSearchParams(location.search).get('category')||'';
-  if(!flowManualSelection&&!requestedCategory&&flowNextCategory)selectedId=String(flowNextCategory);
-  select.innerHTML=orderedCats.length?orderedCats.map(c=>{
+  select.innerHTML=cats.length?cats.map(c=>{
     const status=c.bracket?.locked?' • LOCKED':c.bracket?' • BRACKET READY':' • NOT GENERATED';
-    const next=String(c.id)===String(flowNextCategory)?' • NEXT':' ';
-    return `<option value="${esc(c.id)}">${esc(c.name)}${esc(status)}${esc(next)}</option>`;
+    return `<option value="${esc(c.id)}">${esc(c.name)}${esc(status)}</option>`;
   }).join(''):'<option value="">No combat categories found</option>';
-  if(cats.some(c=>String(c.id)===String(selectedId)))select.value=selectedId; else if(cats.some(c=>String(c.id)===String(old)))select.value=old; else select.value=orderedCats[0]?.id||''; selectedId=select.value;
-  $('meta').textContent='LIVE • Match Flow: '+flow.replaceAll('_',' ')+' • Last updated '+(row?.updated_at?new Date(row.updated_at).toLocaleString():'—');
+  if(cats.some(c=>String(c.id)===String(old)))select.value=old; else select.value=cats[0]?.id||''; selectedId=select.value;
   $('tournamentName').textContent=row?.name||settings.setup?.name||'NEW TOURNAMENT';
   $('meta').textContent='LIVE • Last updated '+(row?.updated_at?new Date(row.updated_at).toLocaleString():'—');
   const c=cats.find(x=>String(x.id)===String(selectedId)); const host=$('bracket');
+  const flowNote=$('flowNote');if(flowNote){const label={ROUND_CATEGORY:'ROUND → CATEGORY',ROUND_BOYS_FIRST:'ROUND → BOYS → CATEGORY',ROUND_GIRLS_FIRST:'ROUND → GIRLS → CATEGORY',BOYS_FIRST:'BOYS → CATEGORY',GIRLS_FIRST:'GIRLS → CATEGORY'}[flow]||flow;flowNote.textContent=`SAVED MATCH FLOW: ${label} • ${flowInfo.ready.length} match(es) currently released in flow order.`;}
   if(!c){host.innerHTML='<div class="empty"><b>No combat category found.</b><br>Create a combat category in Admin → Categories.</div>';return}
   if(!c.bracket){host.innerHTML=`<div class="empty"><b>${esc(c.name)}</b><br>No bracket has been generated yet.<br><small>This bracket has not been generated yet. An administrator must generate it from Admin → Brackets.</small></div>`;return}
   const b=c.bracket;
@@ -323,14 +319,13 @@ function render(){
   b.rounds.forEach((r,ri)=>{const col=document.createElement('section');col.className='round';col.innerHTML=`<h3>${esc(b.mode==='roundrobin'?'ROUND '+(ri+1):roundName(ri,b.rounds.length))}</h3><div class="matches"></div>`;const list=col.querySelector('.matches');
     if(ri===0&&b.mode==='single'){
       const entries=[];(r||[]).forEach(m=>entries.push({pos:Number.isFinite(m.firstRoundPosition)?m.firstRoundPosition:999,type:'match',m}));(b.byeEntries||[]).forEach(x=>entries.push({pos:x.firstRoundPosition,type:'bye',x}));entries.sort((a,z)=>a.pos-z.pos||({bye:0,match:1}[a.type]-({bye:0,match:1}[z.type])));
-      entries.forEach(e=>{if(e.type==='match'){const mi=r.indexOf(e.m),wrap=document.createElement('div');wrap.innerHTML=matchHtml(e.m,ri,mi,pm,tm,b);list.appendChild(wrap.firstElementChild)}else{const wrap=document.createElement('div');wrap.className='bye-entry';wrap.dataset.targetMatch=e.x.targetMatchId||'';wrap.innerHTML=`<span class="bye-tag">BYE</span><b>${esc(nameFor(e.x.playerId,pm))}</b><small>ADVANCES</small>`;list.appendChild(wrap)}});
+      entries.forEach(e=>{if(e.type==='match'){const mi=r.indexOf(e.m),wrap=document.createElement('div');wrap.innerHTML=matchHtml(e.m,ri,mi,pm,tm,b,readyIds.get(String(e.m.id)));list.appendChild(wrap.firstElementChild)}else{const wrap=document.createElement('div');wrap.className='bye-entry';wrap.dataset.targetMatch=e.x.targetMatchId||'';wrap.innerHTML=`<span class="bye-tag">BYE</span><b>${esc(nameFor(e.x.playerId,pm))}</b><small>ADVANCES</small>`;list.appendChild(wrap)}});
     }else{
-      r.forEach((m,mi)=>{const wrap=document.createElement('div');wrap.innerHTML=matchHtml(m,ri,mi,pm,tm,b);list.appendChild(wrap.firstElementChild)});
+      r.forEach((m,mi)=>{const wrap=document.createElement('div');wrap.innerHTML=matchHtml(m,ri,mi,pm,tm,b,readyIds.get(String(m.id)));list.appendChild(wrap.firstElementChild)});
     }
     if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='No active matches';list.appendChild(e)}
     host.appendChild(col);
   });
-  const next=flowReady.find(x=>String(x.c.id)===String(c.id));if(next){const el=host.querySelector(`.match[data-ri=\"${next.ri}\"][data-mi=\"${next.mi}\"]`);if(el)el.classList.add('flow-next');}
   if(b.champion){const x=document.createElement('div');x.className='champion';x.innerHTML='<small>TOURNAMENT CHAMPION</small><b>🏆 '+esc(nameFor(b.champion,pm))+'</b>';host.appendChild(x)}
   host.style.setProperty('--round-count',String(b.rounds.length));
   $('printTournament').textContent=$('tournamentName').textContent||'NEW TOURNAMENT';
@@ -340,7 +335,7 @@ function render(){
 }
 async function init(){
   if(!cfg.url||!cfg.anonKey){setStatus(false,'NOT CONFIGURED');setNotice('Tournament service configuration is missing.','error');return}
-  try{const sel=$('categorySelect');if(sel&&!sel.dataset.flowBound){sel.dataset.flowBound='1';sel.addEventListener('change',()=>{flowManualSelection=true;selectedId=sel.value;render()})}const mod=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');client=mod.createClient(cfg.url,cfg.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});setStatus(true,'CONNECTED');await load();startRealtime();clearInterval(timer);timer=setInterval(load,2000)}catch(e){console.error(e);setStatus(false,'CONNECTION ERROR');setNotice('Unable to connect to the tournament service: '+(e.message||e),'error')}
+  try{const mod=await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');client=mod.createClient(cfg.url,cfg.anonKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});setStatus(true,'CONNECTED');await load();startRealtime()}catch(e){console.error(e);setStatus(false,'CONNECTION ERROR');setNotice('Unable to connect to the tournament service: '+(e.message||e),'error')}
 }
 async function load(){
   try{
@@ -352,14 +347,19 @@ async function load(){
     row=next;await hydrateNormalizedBracket();setStatus(true,'LIVE');setNotice('Live bracket loaded from the official tournament data. Changes will appear automatically.','ok');render();
   }catch(e){console.error(e);setStatus(false,'READ ERROR');setNotice('Unable to load the live bracket: '+(e.message||e),'error')}
 }
-function startRealtime(){if(!client||channel)return;channel=client.channel('radium-bracket-display').on('postgres_changes',{event:'*',schema:'public',table:'tournaments'},()=>load()).on('postgres_changes',{event:'*',schema:'public',table:'matches'},payload=>{if(!row?.id||payload.new?.tournament_id===row.id||payload.old?.tournament_id===row.id)load()}).subscribe()}
+function scheduleRealtimeLoad(){if(realtimeLoadTimer)return;realtimeLoadTimer=setTimeout(()=>{realtimeLoadTimer=null;load()},150)}
+function startRealtime(){if(!client||channel)return;channel=client.channel('radium-bracket-display')
+  .on('postgres_changes',{event:'*',schema:'public',table:'tournaments'},payload=>{if(!row?.id||payload.new?.id===row.id||payload.old?.id===row.id)scheduleRealtimeLoad()})
+  .on('postgres_changes',{event:'*',schema:'public',table:'matches'},payload=>{if(!row?.id||payload.new?.tournament_id===row.id||payload.old?.tournament_id===row.id)scheduleRealtimeLoad()})
+  .on('postgres_changes',{event:'*',schema:'public',table:'categories'},payload=>{if(!row?.id||payload.new?.tournament_id===row.id||payload.old?.tournament_id===row.id)scheduleRealtimeLoad()})
+  .subscribe()}
 $('categorySelect').addEventListener('change',()=>{selectedId=$('categorySelect').value;render()});$('refreshBtn').onclick=load;$('printBtn').onclick=()=>{preparePrint();window.print()};
 function preparePrint(){const h=$('printHeader');if(h){h.style.display='flex';h.style.alignItems='center';h.style.gap='4mm';h.style.marginBottom='3mm';h.querySelector('img').style.width='15mm';h.querySelector('img').style.height='15mm';h.querySelector('img').style.objectFit='contain';h.querySelector('strong').style.display='block';h.querySelector('strong').style.fontSize='13pt';h.querySelector('span').style.display='block';h.querySelector('span').style.fontSize='9pt';}setTimeout(()=>{$('printHeader').style.display='none'},1500)}
 window.addEventListener('resize',()=>requestAnimationFrame(drawTree));
 /* V33: Live Bracket is read-only. Scoreboards write authoritative results directly. */
 if(['TABLE_OFFICIAL','ACCOUNTANT'].includes(requestedRole)){const ab=$('adminBtn');if(ab)ab.style.display='none';}
 $('adminBtn').onclick=()=>{if(requestedRole==='TABLE_OFFICIAL'||requestedRole==='ACCOUNTANT')return;const id=row?.id;const u=id?'index.html?open=bracket&tournament='+encodeURIComponent(id):'index.html';window.open(u,'RADIUM_ADMIN')};
-window.addEventListener('beforeunload',()=>{try{clearInterval(timer);if(channel)client.removeChannel(channel)}catch(e){}});
+window.addEventListener('beforeunload',()=>{try{if(realtimeLoadTimer)clearTimeout(realtimeLoadTimer);if(channel)client.removeChannel(channel)}catch(e){}});
 init();
 })();
 </script>
