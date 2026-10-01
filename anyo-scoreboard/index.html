@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#07142d">
 <title>RADIUM Anyo Scoreboard</title>
 
-  <link rel="stylesheet" href="scoreboard.css">
+  <link rel="stylesheet" href="scoreboard.css?v=20260930v59">
 
 <style id="RADIUM_LOCAL_STYLE_FALLBACK">
 
@@ -20,7 +20,7 @@ button,input{font:inherit}
 button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .screen{width:100vw;height:100vh;min-height:560px;padding:10px;display:flex;flex-direction:column;gap:9px;background:radial-gradient(circle at 50% 0%,#102a61 0,#07142d 38%,#030815 100%)}
 .header{height:74px;flex:0 0 74px;display:grid;grid-template-columns:60px 60px 1fr 60px 60px;align-items:center;border:1px solid var(--line);background:#061126;box-shadow:0 0 20px #0008}
-.logo{width:58px;height:58px;object-fit:contain;justify-self:center}.scoreboard-logo{display:none}
+.logo{width:58px;height:58px;object-fit:contain;justify-self:center;visibility:hidden}.scoreboard-logo{visibility:hidden}
 .brand{text-align:center;line-height:1}
 .brand h1{margin:0;font-size:clamp(22px,3vw,42px);font-weight:900;letter-spacing:3px;text-transform:uppercase}
 .brand .sub{margin-top:6px;color:var(--gold);font-size:clamp(11px,1.25vw,18px);font-weight:900;letter-spacing:1px;text-transform:uppercase}
@@ -79,7 +79,7 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 </head>
 <body>
 <div class="screen">
-  <header class="header"><img class="logo scoreboard-logo" id="logo1" alt=""><img class="logo scoreboard-logo" id="logo2" alt=""><div class="brand"><h1 id="tournamentTitle">RADIUM TOURNAMENT</h1><div class="sub">ANYO SCOREBOARD</div></div><img class="logo scoreboard-logo" id="logo3" alt=""><img class="logo scoreboard-logo" id="logo4" alt=""></header>
+  <header class="header"><img class="logo scoreboard-logo" id="logo1" alt=""><img class="logo scoreboard-logo" id="logo2" alt=""><div class="brand"><h1 id="tournamentTitle">CAPRISAA ARNIS TOURNAMENT</h1><div class="sub">ANYO SCOREBOARD</div></div><img class="logo scoreboard-logo" id="logo3" alt=""><img class="logo scoreboard-logo" id="logo4" alt=""></header>
 
   <section class="eventbar">
     <div class="eventnum"><small>EVENT #</small><strong id="eventNumber">--</strong></div>
@@ -144,7 +144,7 @@ const qs=new URLSearchParams(location.search);
 const court=qs.get('court')||'anyo';
 const categoryId=qs.get('categoryId')||'';
 const categoryName=qs.get('category')||'SELECT ANYO CATEGORY';
-async function loadTournamentTitle(){const tid=qs.get('tournament')||'';if(!tid||!window.RADIUM_DB)return;try{await window.RADIUM_DB.init();const r=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:tid},limit:1});const row=r.data?.[0]||{};const el=document.getElementById('tournamentTitle');if(el)el.textContent=row.name||'RADIUM TOURNAMENT';const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:tid},limit:20});(lr.data||[]).forEach(x=>{const u=window.RADIUM_DB.state?.client?.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const img=document.getElementById('logo'+(i+1));if(img){const src=logos[i]||'';img.src=src;img.style.display=src?'block':'none';img.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
+async function loadTournamentTitle(){const tid=qs.get('tournament')||'';if(!tid||!window.RADIUM_DB)return;try{await window.RADIUM_DB.init();const r=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:tid},limit:1});const row=r.data?.[0]||{};const el=document.getElementById('tournamentTitle');if(el)el.textContent='CAPRISAA ARNIS TOURNAMENT';const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:tid},limit:20});(lr.data||[]).forEach(x=>{const u=window.RADIUM_DB.state?.client?.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const img=document.getElementById('logo'+(i+1));if(img){const src=logos[i]||'';img.src=src;img.style.visibility=src?'visible':'hidden';img.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
 const division=qs.get('division')||qs.get('sex')||'Individual';
 const style=qs.get('style')||qs.get('level')||'Traditional';
 const weapon=qs.get('weapon')||'Any';
@@ -200,8 +200,11 @@ async function loadOfficialEntries(){
   }else{
     entryList.sort((a,b)=>{const ai=Number.isInteger(a.passedIndex)?a.passedIndex:999999;const bi=Number.isInteger(b.passedIndex)?b.passedIndex:999999;return ai-bi||String(a.number).localeCompare(String(b.number));});
   }
-  performerIndex=entryList.length?Math.min(Math.max(0,performerIndex),entryList.length-1):0;
+  const requestedEntryId=String(qs.get('competitorId')||'');
+  const requestedIndex=requestedEntryId?entryList.findIndex(e=>String(e.id)===requestedEntryId):-1;
+  performerIndex=entryList.length?(requestedIndex>=0?requestedIndex:Math.min(Math.max(0,performerIndex),entryList.length-1)):0;
   currentId=entryList[performerIndex]?.id||'';
+  if(qs.get('repeat')==='1'){const sub=document.querySelector('.brand .sub');if(sub)sub.textContent='ANYO SCOREBOARD • REPEAT PERFORMANCE';}
   count=Math.min(5,Math.max(3,Number(category.judges)||Number(qs.get('judges'))||5));
 }
 let scores=[null,null,null,null,null];
@@ -255,12 +258,12 @@ async function emit(payload){
   payload.entryId=payload.entryId||payload.competitorId;
   const r=await window.RADIUM_DB.rpc('radium_save_anyo_performance',{p_tournament_id:tid,p_payload:payload});
   if(r.error)throw r.error;
-  const row=Array.isArray(r.data)?r.data[0]:r.data;if(row?.id)payload.id=row.id;
+  const row=Array.isArray(r.data)?r.data[0]:r.data;if(row?.id)payload.id=row.id;if(row?.attempt_number!=null)payload.attemptNumber=Number(row.attempt_number);
   try{if(window.opener&&!window.opener.closed)window.opener.postMessage({type:'RADIUM_ANYO_SCORE',payload},'*')}catch(e){}
   try{const bc=new BroadcastChannel('RADIUM_ANYO_SCORE');bc.postMessage(payload);bc.close()}catch(e){}
   return payload;
 }
-function buildPayload(){const c=calc();if(!c)return null;const final=finalScoreValue();return{time:new Date().toISOString(),court,categoryId,categoryName,competitorId:currentId,entryId:currentId,competitorType:'entry',judgeCount:count,scores:c.scores,rawTotal:c.rawTotal,dropped:c.dropped,keptTotal:c.keptTotal,average:c.average,judgeAverage:c.average,deductions:{...deductions},deductionRates:{...deductionRates},totalDeduction:totalDeduction(),finalScore:final,elapsedMs:Math.round(currentElapsed()),elapsedTime:formatTime(currentElapsed()),startedAt:startedAtIso,finishedAt:finishedAtIso||new Date().toISOString(),performerIndex,finished:true}}
+function buildPayload(){const c=calc();if(!c)return null;const final=finalScoreValue();return{time:new Date().toISOString(),court,categoryId,categoryName,competitorId:currentId,entryId:currentId,competitorType:'entry',judgeCount:count,scores:c.scores,rawTotal:c.rawTotal,dropped:c.dropped,keptTotal:c.keptTotal,average:c.average,judgeAverage:c.average,deductions:{...deductions},deductionRates:{...deductionRates},totalDeduction:totalDeduction(),finalScore:final,elapsedMs:Math.round(currentElapsed()),elapsedTime:formatTime(currentElapsed()),startedAt:startedAtIso,finishedAt:finishedAtIso||new Date().toISOString(),performerIndex,repeatAttempt:qs.get('repeat')==='1',finished:true}}
 function openSave(){if(running){alert('Press STOP to end the performance before saving. The final time will then be revealed.');return}if(elapsedMs<=0){alert('Start and stop the performance timer before saving.');return}const c=calc();if(!c){alert('Enter all active judge scores from 7.5 to 10.0.');return}document.getElementById('saveMessage').textContent=`Judge average ${c.average.toFixed(2)} • Deduction −${totalDeduction().toFixed(2)} • Final ${finalScoreValue().toFixed(2)} • Time ${formatTime(currentElapsed())}. Save this Anyo performance?`;document.getElementById('saveOverlay').style.display='flex'}
 function closeSave(){document.getElementById('saveOverlay').style.display='none'}
 let anyoSaving=false;
