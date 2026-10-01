@@ -115,7 +115,7 @@
     const sessionResult=await window.RADIUM_DB.session();
     const token=sessionResult?.data?.session?.access_token;
     if(!token)throw new Error('Your RADIUM staff session has expired. Sign in again before using AI import understanding.');
-    const categories=(state().categories||[]).map(c=>({name:c.name,event:c.event,event_type:c.event_type,sex:c.sex,gender:c.gender,ageFrom:c.ageFrom,ageTo:c.ageTo,age_min:c.age_min,age_max:c.age_max,weightFrom:c.weightFrom,weightTo:c.weightTo,weight_min:c.weight_min,weight_max:c.weight_max,anyoType:c.anyoType,anyoStyle:c.anyoStyle,anyoWeapon:c.anyoWeapon,division:c.division,style:c.style,weapon:c.weapon}));
+    const categories=(state().categories||[]).map(c=>({name:c.name,preset:c.preset,event:c.event,event_type:c.event_type,sex:c.sex,gender:c.gender,ageFrom:c.ageFrom,ageTo:c.ageTo,age_min:c.age_min,age_max:c.age_max,weightFrom:c.weightFrom,weightTo:c.weightTo,weight_min:c.weight_min,weight_max:c.weight_max,anyoType:c.anyoType,anyoStyle:c.anyoStyle,anyoWeapon:c.anyoWeapon,division:c.division,style:c.style,weapon:c.weapon}));
     const base=String(window.RADIUM_SUPABASE_CONFIG.url).replace(/\/+$/,'');
     const res=await fetch(base+'/functions/v1/radium-ai-import',{method:'POST',headers:{'Content-Type':'application/json','apikey':window.RADIUM_SUPABASE_CONFIG.anonKey||'','Authorization':'Bearer '+token},body:JSON.stringify({rows:rawRows,categories})});
     const data=await res.json().catch(()=>({}));
@@ -140,7 +140,8 @@
 
   function parseEventChoice(choice){
     const x=normalize(choice),out=[];
-    const add=(event,anyoType='',style='',weapon='')=>out.push({event,anyoType,style,weapon,label:String(choice),weightRange:parseWeightRange(choice)});
+    const schoolLevel=/\belementary\b/.test(x)?'Elementary':/\bsecondary\b/.test(x)?'Secondary':'';
+    const add=(event,anyoType='',style='',weapon='')=>out.push({event,anyoType,style,weapon,schoolLevel,label:String(choice),weightRange:parseWeightRange(choice)});
     const isAnyo=/anyo|likha|form|forms|kata/.test(x)&&(/single|double|espada|sword|dagger|traditional|trad\b|non[- ]?trad|synchronized|sync|mixed|solo|weapon/.test(x));
     const style=/non[- ]?trad|modern|freestyle/.test(x)?'Non-Traditional':/traditional|trad\b|classic|old[- ]?style/.test(x)?'Traditional':'';
     let weapon='';
@@ -160,7 +161,7 @@
     const pieces=split(raw); let out=[];
     pieces.forEach(p=>{const q=parseEventChoice(p);if(q.length)out.push(...q)});
     if(!out.length&&raw){const q=parseEventChoice(raw);if(q.length)out=q}
-    const seen=new Set();return out.filter(e=>{const k=[e.event,e.anyoType,e.style,e.weapon].join('|');if(seen.has(k))return false;seen.add(k);return true});
+    const seen=new Set();return out.filter(e=>{const k=[e.event,e.schoolLevel,e.anyoType,e.style,e.weapon].join('|');if(seen.has(k))return false;seen.add(k);return true});
   }
 
   function isDepEdPEKAF(){return String(state().setup?.competitionProgram||'').toUpperCase()==='DEPED_PEKAF';}
@@ -177,6 +178,14 @@
     // age range. Their preset is authoritative for Elementary/Secondary matching.
     let ageFrom=Number(c.ageFrom??c.age_min??0), ageTo=Number(c.ageTo??c.age_max??99);
     const preset=String(c.preset??'').toUpperCase();
+    const categoryName=String(c.name??'');
+    const categoryLevel=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(categoryName)?'Elementary':
+      preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(categoryName)?'Secondary':'';
+    // The CAPRISAA workbook explicitly separates Elementary and Secondary
+    // event sections. Use that section as a matching constraint because the
+    // configured age ranges overlap (Elementary 1–13, Secondary 1–18).
+    const requestedLevel=String(sel?.schoolLevel||'');
+    if(requestedLevel&&categoryLevel&&requestedLevel!==categoryLevel)return false;
     if(preset.includes('ANYO-ELEMENTARY')){ ageFrom=1; ageTo=13; }
     else if(preset.includes('ANYO-SECONDARY')){ ageFrom=1; ageTo=18; }
     const weightFrom=Number(c.weightFrom??c.weight_min??0), weightTo=Number(c.weightTo??c.weight_max??999);
@@ -431,8 +440,8 @@
       const type=/mixed/.test(section)?'Mixed':/synchronized|synchronised/.test(section)?'Synchronized':'Individual';
       const groupReference=type==='Individual'?'':`CAPRISAA-${grade}-${type}`;
       const leftName=cell(eventRows,r,1),rightName=cell(eventRows,r,4);
-      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo`,groupReference);
-      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo`,groupReference);
+      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference);
+      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference);
     }
     if(unmatchedNames.size)throw new Error('These selected names in EVENT REGISTRATION were not found in ATHLETE MASTERLIST: '+[...unmatchedNames].join(', ')+'. Correct the spelling or add the athlete to the masterlist, then upload again.');
     const rows=[];
