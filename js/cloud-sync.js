@@ -201,7 +201,7 @@
    * fast page load cloud-sync.js can attempt to load Supabase data
    * before __RADIUM_SET_DATA exists.
    */
-  const waitForStateBridge=async(timeoutMs=5000)=>{
+  const waitForStateBridge=async(timeoutMs=15000)=>{
 
     const started=Date.now();
 

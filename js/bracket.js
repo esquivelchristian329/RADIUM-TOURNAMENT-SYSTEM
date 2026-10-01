@@ -592,71 +592,7 @@ async function processResultPayload(r){
 async function processOneResult(rawKey){const r=window[rawKey];return r?processResultPayload(r):false}
 async function processResult(){return window.__RADIUM_PENDING_RESULT_PROMISE||true}
 function renderResults(){$('resultsTable').innerHTML=data.results.slice(0,300).map(r=>`<tr><td>${new Date(r.completedAt||r.time||Date.now()).toLocaleString()}</td><td>${esc(r.category)}</td><td>${Number(r.match)}</td><td>${esc(r.blue)}</td><td>${esc(r.red)}</td><td>${r.blueScore}-${r.redScore}</td><td><b>${esc(player(r.winner)?.name||r.winner)}</b></td><td>${esc(r.official||'Scoreboard')}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">No confirmed results.</td></tr>';$('auditLog').innerHTML=data.audit.slice(0,100).map(a=>`<div class="activity-row"><b>${new Date(a.time).toLocaleString()}</b> — ${esc(a.action)} — ${esc(a.detail)}</div>`).join('')||'<div class="empty">No audit entries.</div>'}
-function reportDivision(category){
-  if(!category)return '';
-  const preset=String(category.preset||'').toUpperCase();
-  const name=String(category.name||'').toUpperCase();
-  if(preset==='DEPED-PEKAF-ANYO-ELEMENTARY'||name.startsWith('ELEMENTARY'))return 'Elementary';
-  if(preset==='DEPED-PEKAF-ANYO-SECONDARY'||name.startsWith('SECONDARY'))return 'Secondary';
-  // DepEd–PEKAF 12–17 combatives are a Secondary competition.
-  if(preset==='DEPED-PEKAF-COMBATIVES-12-17')return 'Secondary';
-  if(/\bELEMENTARY\b/.test(name))return 'Elementary';
-  if(/\bSECONDARY\b/.test(name))return 'Secondary';
-  return '';
-}
-function reportTeamMedals(teamId,division){
-  return data.medals.filter(m=>{
-    if(String(m.teamId||'')!==String(teamId))return false;
-    return reportDivision(cat(m.categoryId))===division;
-  }).reduce((a,m)=>{if(m.medal)a[m.medal]++;return a},{gold:0,silver:0,bronze:0});
-}
-function renderReportDivisionTable(division,teamIds){
-  const rows=Array.from(teamIds).map(id=>{
-    const t=team(id);if(!t)return null;
-    const m=reportTeamMedals(id,division);
-    const pts=m.gold*data.setup.gold+m.silver*data.setup.silver+m.bronze*data.setup.bronze;
-    return {...t,m,pts};
-  }).filter(Boolean).sort((a,b)=>b.pts-a.pts||b.m.gold-a.m.gold||b.m.silver-a.m.silver||b.m.bronze-a.m.bronze||String(a.name).localeCompare(String(b.name)));
-  return `<div class="report-division-tally"><h4>${division} Medal Tally</h4><div class="table-wrap"><table><thead><tr><th>RANK</th><th>TEAM</th><th>GOLD</th><th>SILVER</th><th>BRONZE</th><th>POINTS</th></tr></thead><tbody>${rows.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.name)}</td><td>${t.m.gold}</td><td>${t.m.silver}</td><td>${t.m.bronze}</td><td>${t.pts}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">No registered teams in this division.</td></tr>'}</tbody></table></div></div>`;
-}
-async function renderReports(){
-  const host=$('medalTable');
-  const wrap=host?.closest('.table-wrap');
-  if(!host||!wrap)return;
-  const tid=window.RADIUM_CLOUD?.getId?.();
-  const teamIds={Elementary:new Set(),Secondary:new Set()};
-  // Build the team list from actual tournament category registrations. This keeps
-  // a team in the correct school division and also shows teams with zero medals.
-  if(tid&&window.RADIUM_DB){
-    try{
-      const rr=await window.RADIUM_DB.select('category_registrations',{select:'id,player_id,category_id,anyo_entry_id,status,team_id',eq:{tournament_id:tid}});
-      const regs=Array.isArray(rr?.data)?rr.data:[];
-      for(const r of regs){
-        const status=String(r.status||'ACTIVE').toUpperCase();
-        if(['DELETED','WITHDRAWN'].includes(status))continue;
-        const div=reportDivision(cat(r.category_id));
-        if(!div)continue;
-        let teamId=r.team_id||'';
-        if(!teamId&&r.player_id)teamId=player(r.player_id)?.teamId||'';
-        if(teamId)teamIds[div].add(String(teamId));
-      }
-    }catch(e){console.warn('Report registration read failed:',e)}
-  }
-  // Keep already-loaded tournament registrations as a fallback when cloud rows are
-  // temporarily unavailable, but still classify them by their actual category.
-  if(!teamIds.Elementary.size&&!teamIds.Secondary.size){
-    for(const c of data.categories){
-      const div=reportDivision(c);if(!div)continue;
-      const ids=new Set();
-      (c.bracket?.players||[]).forEach(pid=>{const p=player(pid);if(p?.teamId)ids.add(String(p.teamId))});
-      ids.forEach(id=>teamIds[div].add(id));
-    }
-  }
-  // The original single-table target is retained only as an anchor for compatibility.
-  wrap.innerHTML=renderReportDivisionTable('Elementary',teamIds.Elementary)+renderReportDivisionTable('Secondary',teamIds.Secondary);
-  const winners=data.categories.map(c=>{const w=c.bracket?.champion;const div=reportDivision(c);return `<tr><td>${esc(div||'—')}</td><td>${esc(c.name)}</td><td>${esc(w?(player(w)?.name||w):'—')}</td><td>${esc(w?team(player(w)?.teamId)?.name||'—':'—')}</td></tr>`}).join('');
-  $('reportBody').innerHTML=`<h3>${esc(data.setup.name)}</h3><p>${esc(data.setup.date)} • ${esc(data.setup.venue)} • ${esc(data.setup.organizer)}</p><p>${data.players.length} players • ${data.categories.length} categories • ${data.results.length} confirmed matches</p><h3>Category Winners</h3><div class="table-wrap"><table><thead><tr><th>DIVISION</th><th>CATEGORY</th><th>WINNER</th><th>TEAM</th></tr></thead><tbody>${winners||'<tr><td colspan="4">No winners yet.</td></tr>'}</tbody></table></div>`;
-}
+function renderReports(){const rows=data.teams.map(t=>{const m=medalCounts(t.id),pts=m.gold*data.setup.gold+m.silver*data.setup.silver+m.bronze*data.setup.bronze;return {...t,m,pts}}).sort((a,b)=>b.pts-a.pts||b.m.gold-a.m.gold);$('medalTable').innerHTML=rows.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.name)}</td><td>${t.m.gold}</td><td>${t.m.silver}</td><td>${t.m.bronze}</td><td>${t.pts}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">No teams.</td></tr>';const winners=data.categories.map(c=>{const w=c.bracket?.champion;return `<tr><td>${esc(c.name)}</td><td>${esc(w?(player(w)?.name||w):'—')}</td><td>${esc(w?team(player(w)?.teamId)?.name||'—':'—')}</td></tr>`}).join('');$('reportBody').innerHTML=`<h3>${esc(data.setup.name)}</h3><p>${esc(data.setup.date)} • ${esc(data.setup.venue)} • ${esc(data.setup.organizer)}</p><p>${data.players.length} players • ${data.categories.length} categories • ${data.results.length} confirmed matches</p><h3>Category Winners</h3><div class="table-wrap"><table><thead><tr><th>CATEGORY</th><th>WINNER</th><th>TEAM</th></tr></thead><tbody>${winners||'<tr><td colspan="3">No winners yet.</td></tr>'}</tbody></table></div>`}
 function download(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 $('printReport').onclick=()=>showPage('reportsPage')||setTimeout(()=>window.print(),50);$('printBrackets').onclick=()=>{showPage('bracketPage');setTimeout(()=>window.print(),50)};$('exportCsv').onclick=()=>{const rows=[['Time','Category','Blue','Red','Blue Score','Red Score','Winner'],...data.results.map(r=>[r.completedAt||'',r.category,r.blue,r.red,r.blueScore,r.redScore,player(r.winner)?.name||r.winner])];download('RADIUM_Results.csv',rows.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\n'),'text/csv')};
 $('lockBtn').onclick=async()=>{const configured=String(data.setup.pin||data.setup.pinHash||'');if(!data.locked&&!configured)return alert('Set an Official PIN in SETUP before locking the tournament.');const hash=async v=>{const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(v||'')));return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('')};if(data.locked){const pin=prompt('Enter official PIN');if(pin==null)return;const ok=data.setup.pin?pin===data.setup.pin:(await hash(pin))===data.setup.pinHash;if(ok){data.locked=false;document.body.classList.remove('locked');save();toast('Controls unlocked')}else alert('Incorrect PIN')}else{data.locked=true;document.body.classList.add('locked');save();toast('Tournament controls locked')}};
