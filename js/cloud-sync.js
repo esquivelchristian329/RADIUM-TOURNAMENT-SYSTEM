@@ -643,7 +643,19 @@ window.__RADIUM_SET_DATA(
         return;
       }
       let id=this.getId();
-      if(id){try{await this.pull();return}catch(e){this.clearId();this.state.lastError=e;}}
+      if(id){
+        try{
+          // Restore the Admin's tournament membership before reading the
+          // tournament row. RLS can reject the first pull after a fresh login
+          // even though the active tournament ID is still valid.
+          if(role()==='admin') await this.ensureMembership(id);
+          await this.pull();
+          return;
+        }catch(e){
+          this.clearId();
+          this.state.lastError=e;
+        }
+      }
       try{
         const rows=await this.listTournaments();
         const safeRows=Array.isArray(rows)?rows:[];
