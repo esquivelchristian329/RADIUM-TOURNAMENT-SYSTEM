@@ -50,12 +50,26 @@
     const d=state();if(!d||!c)return [];
     if(isAnyo(c)){
       if((c.anyoType||'Individual')==='Individual'){
+        // ANYO roster is authoritative from the actual anyo_entries registration.
+        // Do NOT depend on players.events.anyoIndividual: that legacy flag can be
+        // missing even when the athlete is correctly registered in this category.
         const rows=[];
-        for(const p of d.players||[]){
-          if(!eligible(p,c)||p.events?.anyoIndividual!==true)continue;
-          let e=(d.anyoEntries||[]).find(x=>String(x.categoryId)===String(c.id)&&x.type==='Individual'&&x.memberIds?.[0]===p.id&&x.status!=='deleted');
-          if(e&&secondaryAnyoDuplicateOfElementary(e,c,d))continue;
-          if(!e)e={id:`tmp-${c.id}-${p.id}`,memberIds:[p.id],number:p.number||p.id};
+        const seenPlayers=new Set();
+        const entries=(d.anyoEntries||[]).filter(e=>
+          String(e.categoryId)===String(c.id) &&
+          String(e.type||e.entryType||'Individual')==='Individual' &&
+          !['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())
+        );
+        for(const e of entries){
+          const pid=(e.memberIds||[]).map(String).find(Boolean);
+          if(!pid||seenPlayers.has(pid))continue;
+          const p=(d.players||[]).find(x=>String(x.id)===pid);
+          if(!p||!eligible(p,c))continue;
+          // If an athlete has an Elementary registration and a duplicate
+          // Secondary registration, keep the Elementary registration and do not
+          // put the duplicate into the Secondary draw.
+          if(secondaryAnyoDuplicateOfElementary(e,c,d))continue;
+          seenPlayers.add(pid);
           const cs=p.categorySeeds?.[c.id]||{};
           rows.push({kind:'player',id:p.id,name:p.name,teamId:p.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):(Number.isFinite(Number(cs.drawNumber))?Number(cs.drawNumber):null),player:p,entry:e});
         }
