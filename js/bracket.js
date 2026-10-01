@@ -161,7 +161,7 @@ async function loadAnyoPerformerDirectory(){
       const people=members.map(m=>players.get(String(m.player_id))).filter(Boolean);
       const names=people.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
       const teamNames=[...new Set(people.map(p=>teams.get(String(p.team_id))?.name).filter(Boolean))];
-      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberCount:people.length,rawMemberCount:members.length};
+      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',status:e.status||'active',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberIds:members.map(m=>String(m.player_id)).filter(Boolean),memberCount:people.length,rawMemberCount:members.length};
     });
     const entryIds=new Set(entries.map(e=>String(e.id)));
     const activeCategories=categories.filter(c=>entries.some(e=>String(e.categoryId)===String(c.id))||categories.length);
@@ -186,10 +186,19 @@ async function loadAnyoPerformerDirectory(){
       return allEntries.some(other=>{
         if(String(other?.id)===String(entry?.id))return false;
         if(!elementaryIds.has(String(other?.categoryId)))return false;
-        if(String(other?.type||'Individual').toLowerCase()!==String(entry?.type||'Individual').toLowerCase())return false;
         if(['deleted','withdrawn'].includes(String(other?.status||'').toLowerCase()))return false;
-        const otherIds=(other?.memberIds||[]).map(String);
-        return ids.some(id=>otherIds.includes(id));
+        const otherIds=(other?.memberIds||[]).map(String).filter(Boolean);
+        if(!otherIds.length)return false;
+        // Individual: the same athlete is registered in Elementary.
+        if(String(entry?.type||'Individual').toLowerCase()==='individual'){
+          return ids.some(id=>otherIds.includes(id));
+        }
+        // Synchronized/Mixed: treat the group as the same registration when
+        // the member sets overlap substantially (or exactly), not merely one
+        // unrelated athlete from the same team.
+        const overlap=ids.filter(id=>otherIds.includes(id)).length;
+        const minSize=Math.min(ids.length,otherIds.length);
+        return minSize>0 && overlap===minSize;
       });
     };
     const secondaryEntryConflictsWithElementary=(entry, category, allEntries, playerMap, elementaryCategories)=>{
