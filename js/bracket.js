@@ -118,111 +118,178 @@ let __anyoDirectDirectoryLoading=false;
 let __anyoDirectoryRetryCount=0;
 let __anyoDirectoryLastTid='';
 
-async function loadAnyoPerformerDirectory(){
+async function loadAnyoPerformerDirectory(options={}){
   const host=$('anyoContent');
   const tid=window.RADIUM_CLOUD?.getId?.()||activeTournamentId();
   if(!host||!tid||__anyoDirectDirectoryLoading)return;
   __anyoDirectoryLastTid=String(tid);
   if(!window.RADIUM_DB){
     host.innerHTML='<div class="card"><div class="empty">LOADING ANYO PERFORMERS…</div></div>';
-    if(__anyoDirectoryRetryCount<5){const retry=++__anyoDirectoryRetryCount;setTimeout(()=>{if(String(window.RADIUM_CLOUD?.getId?.()||activeTournamentId())===String(tid))loadAnyoPerformerDirectory();},500*retry);}
+    if(__anyoDirectoryRetryCount<5){const retry=++__anyoDirectoryRetryCount;setTimeout(()=>{if(String(window.RADIUM_CLOUD?.getId?.()||activeTournamentId())===String(tid))loadAnyoPerformerDirectory(options);},500*retry);}
     return;
   }
   __anyoDirectDirectoryLoading=true;
-  host.innerHTML='<div class="card"><div class="empty">LOADING ANYO PERFORMERS DIRECTLY FROM SUPABASE…</div></div>';
+  host.innerHTML='<div class="card"><div class="empty">LOADING ANYO PERFORMERS…</div></div>';
   try{
     const init=await window.RADIUM_DB.init();
     if(!init?.enabled){
-      if(__anyoDirectoryRetryCount<5){const retry=++__anyoDirectoryRetryCount;setTimeout(()=>loadAnyoPerformerDirectory(),500*retry);return;}
+      if(__anyoDirectoryRetryCount<5){const retry=++__anyoDirectoryRetryCount;setTimeout(()=>loadAnyoPerformerDirectory(options),500*retry);return;}
       throw new Error('Supabase database bridge is not enabled.');
     }
-    // Do not depend on cloud-sync state. The ANYO page reads the authoritative
-    // tournament rows directly, which avoids the old empty-list state problem.
-    const [cr,er,mr,pr,tr]=await Promise.all([
-      window.RADIUM_DB.select('categories',{select:'id,name,event_type,gender,event_number,judges,preset,division,style,weapon,age_min,age_max,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('anyo_entries',{select:'id,tournament_id,category_id,entry_type,entry_number,style,weapon,group_reference,status,draw_order,draw_type,drawn_at',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('anyo_entry_members',{select:'entry_id,tournament_id,player_id,member_position',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}})
-    ]);
-    for(const q of [cr,er,mr,pr,tr])if(q?.error)throw q.error;
 
-    const categories=(cr.data||[]).filter(c=>String(c.event_type||'').trim().toLowerCase()==='anyo');
-    const players=new Map((pr.data||[]).map(p=>[String(p.id),p]));
-    const teams=new Map((tr.data||[]).map(t=>[String(t.id),t]));
-    const membersByEntry=new Map();
-    (mr.data||[]).forEach(m=>{
-      const k=String(m.entry_id);
-      if(!membersByEntry.has(k))membersByEntry.set(k,[]);
-      membersByEntry.get(k).push(m);
-    });
-    const entries=(er.data||[]).filter(e=>!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())).map(e=>{
-      const members=(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0));
-      const people=members.map(m=>players.get(String(m.player_id))).filter(Boolean);
-      const names=people.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
-      const teamNames=[...new Set(people.map(p=>teams.get(String(p.team_id))?.name).filter(Boolean))];
-      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberCount:people.length,rawMemberCount:members.length};
-    });
-    const entryIds=new Set(entries.map(e=>String(e.id)));
-    const activeCategories=categories.filter(c=>entries.some(e=>String(e.categoryId)===String(c.id))||categories.length);
-    const unresolved=entries.filter(e=>e.rawMemberCount>0&&e.memberCount===0).length;
-    const orphan=entries.filter(e=>!categories.some(c=>String(c.id)===String(e.categoryId))).length;
+    // Load the small category directory first. The old renderer downloaded every
+    // player, team, entry and member row before it could show the page. That made
+    // the Anyo page unnecessarily slow on mobile and also made category selection
+    // depend on a large unrelated data set.
+    const cr=await window.RADIUM_DB.select('categories',{select:'id,name,event_type,gender,event_number,judges,preset,division,style,weapon,age_min,age_max,status',eq:{tournament_id:tid}});
+    if(cr?.error)throw cr.error;
+    const categories=(cr.data||[]).filter(c=>String(c.event_type||'').trim().toLowerCase()==='anyo' && !['deleted','inactive'].includes(String(c.status||'').toLowerCase()));
 
+    // A category's school level must come from its explicit preset/name first,
+    // then its age range. Never infer Elementary merely because "Secondary" was
+    // not found in the name.
+    const categoryLevel=c=>{
+      const marker=`${c?.preset||''} ${c?.name||''}`.toLowerCase();
+      if(/\belementary\b/.test(marker))return 'Elementary';
+      if(/\bsecondary\b/.test(marker))return 'Secondary';
+      const max=Number(c?.age_max??c?.ageTo);
+      if(Number.isFinite(max)&&max>13)return 'Secondary';
+      return 'Elementary';
+    };
+    const categoryById=new Map(categories.map(c=>[String(c.id),c]));
     const weaponOrder={'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3};
     const divisionOrder={'Individual':1,'Synchronized':2,'Mixed':3};
-    const divisionOf=c=>String(c.name||'').toLowerCase().includes('secondary')?'Secondary':'Elementary';
     const sortedCategories=[...categories].sort((a,b)=>{
-      const da=divisionOf(a),db=divisionOf(b); if(da!==db)return da==='Elementary'?-1:1;
+      const da=categoryLevel(a),db=categoryLevel(b); if(da!==db)return da==='Elementary'?-1:1;
+      const ga=String(a.gender||'Mixed'),gb=String(b.gender||'Mixed'); if(ga!==gb)return ga.localeCompare(gb);
       const wa=weaponOrder[a.weapon]||99,wb=weaponOrder[b.weapon]||99; if(wa!==wb)return wa-wb;
       const xa=divisionOrder[a.division]||99,xb=divisionOrder[b.division]||99; if(xa!==xb)return xa-xb;
-      return String(a.name).localeCompare(String(b.name));
+      return String(a.name||'').localeCompare(String(b.name||''));
     });
-    const currentId=String(data.activeCategory||'');
+    const requestedId=options.categoryId!==undefined?String(options.categoryId||''):'';
+    const currentId=requestedId||String(data.activeCategory||'');
     const selectedCategory=sortedCategories.find(c=>String(c.id)===currentId)||sortedCategories[0]||null;
     if(selectedCategory)data.activeCategory=selectedCategory.id;
-    const options=(division)=>sortedCategories.filter(c=>divisionOf(c)===division).map(c=>`<option value="${esc(c.id)}">${esc(c.name.replace(/^Elementary\s*•\s*|^Secondary\s*•\s*/i,''))}</option>`).join('');
-    const selector=`<div class="anyo-category-selector card"><div><b>SELECT ANYO CATEGORY</b><div class="muted">Choose one category to display its performer list.</div></div><select id="anyoPerformerCategory" class="search"><option value="">SELECT CATEGORY</option>${sortedCategories.filter(c=>divisionOf(c)==='Elementary').length?`<optgroup label="ELEMENTARY">${options('Elementary')}</optgroup>`:''}${sortedCategories.filter(c=>divisionOf(c)==='Secondary').length?`<optgroup label="SECONDARY">${options('Secondary')}</optgroup>`:''}</select></div>`;
-    const toolbar=`<div class="anyo-cloud-toolbar"><div><b>ANYO PERFORMERS — SUPABASE</b><span class="muted">${categories.length} categories • ${entries.length} entries • ${entries.reduce((n,e)=>n + (Number(e.memberCount) || 0), 0)} performers</span></div><button type="button" class="btn" id="refreshAnyoPerformersBtn">REFRESH</button></div>`;
-    const warning=(unresolved||orphan)?`<div class="card" style="margin-bottom:16px;border-left:4px solid #d97706"><b>ANYO DATA CHECK</b><div class="muted" style="margin-top:5px">${unresolved} entries have member rows whose players could not be resolved; ${orphan} entries reference a missing category. Existing Supabase data was not changed.</div></div>`:'';
+
+    const optionsFor=(division)=>sortedCategories.filter(c=>categoryLevel(c)===division).map(c=>`<option value="${esc(c.id)}">${esc(String(c.name||'').replace(/^Elementary\s*•\s*|^Secondary\s*•\s*/i,''))}</option>`).join('');
+    const selector=`<div class="anyo-category-selector card"><div><b>SELECT ANYO CATEGORY</b><div class="muted">Choose one category to display its performer list.</div></div><select id="anyoPerformerCategory" class="search"><option value="">SELECT CATEGORY</option>${sortedCategories.some(c=>categoryLevel(c)==='Elementary')?`<optgroup label="ELEMENTARY">${optionsFor('Elementary')}</optgroup>`:''}${sortedCategories.some(c=>categoryLevel(c)==='Secondary')?`<optgroup label="SECONDARY">${optionsFor('Secondary')}</optgroup>`:''}</select></div>`;
+
+    // Fetch only the selected category's entries. This is the main performance
+    // improvement: the page no longer downloads all tournament performers just
+    // to display one category.
+    let entries=[];
+    let unresolved=0;
+    let orphan=0;
+    if(selectedCategory){
+      const er=await window.RADIUM_DB.select('anyo_entries',{select:'id,tournament_id,category_id,entry_type,entry_number,style,weapon,group_reference,status,draw_order,draw_type,drawn_at',eq:{tournament_id:tid,category_id:selectedCategory.id}});
+      if(er?.error)throw er.error;
+      const rawEntries=(er.data||[]).filter(e=>!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase()));
+      const entryIds=rawEntries.map(e=>e.id).filter(Boolean);
+      let members=[];
+      if(entryIds.length){
+        const mr=await window.RADIUM_DB.client().from('anyo_entry_members').select('entry_id,tournament_id,player_id,member_position').eq('tournament_id',tid).in('entry_id',entryIds);
+        if(mr?.error)throw mr.error;
+        members=mr.data||[];
+      }
+      const playerIds=[...new Set(members.map(m=>m.player_id).filter(Boolean))];
+      let people=[];
+      if(playerIds.length){
+        const pr=await window.RADIUM_DB.client().from('players').select('id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status').eq('tournament_id',tid).in('id',playerIds);
+        if(pr?.error)throw pr.error;
+        people=pr.data||[];
+      }
+      const teamIds=[...new Set(people.map(p=>p.team_id).filter(Boolean))];
+      let teamRows=[];
+      if(teamIds.length){
+        const tr=await window.RADIUM_DB.client().from('teams').select('id,name').eq('tournament_id',tid).in('id',teamIds);
+        if(tr?.error)throw tr.error;
+        teamRows=tr.data||[];
+      }
+      const players=new Map(people.map(p=>[String(p.id),p]));
+      const teams=new Map(teamRows.map(t=>[String(t.id),t]));
+      const membersByEntry=new Map();
+      members.forEach(m=>{const k=String(m.entry_id);if(!membersByEntry.has(k))membersByEntry.set(k,[]);membersByEntry.get(k).push(m)});
+
+      // Reject a registration from the visible performer list when its member(s)
+      // do not actually belong to the category's school-level age range/gender.
+      // This prevents an Elementary entry with 16–17-year-old members from
+      // appearing under Elementary, and an 11-year-old Secondary entry from
+      // appearing under Secondary, even if the underlying registration row is bad.
+      const categoryEntryEligible=(c,memberPeople)=>{
+        if(!memberPeople.length)return false;
+        const min=Number(c.age_min),max=Number(c.age_max);
+        if(Number.isFinite(min)||Number.isFinite(max)){
+          for(const p of memberPeople){
+            const a=Number(p.age);
+            if(!Number.isFinite(a))return false;
+            if(Number.isFinite(min)&&a<min)return false;
+            if(Number.isFinite(max)&&a>max)return false;
+          }
+        }
+        const gender=String(c.gender||'Mixed');
+        if(gender!=='Mixed'&&memberPeople.some(p=>String(p.gender||'')!==gender))return false;
+        return true;
+      };
+
+      entries=rawEntries.map(e=>{
+        const memberRows=(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0));
+        const memberPeople=memberRows.map(m=>players.get(String(m.player_id))).filter(Boolean);
+        const valid=categoryEntryEligible(selectedCategory,memberPeople);
+        if(memberRows.length&&memberPeople.length!==memberRows.length)unresolved++;
+        if(!categoryById.has(String(e.category_id)))orphan++;
+        const names=memberPeople.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
+        const teamNames=[...new Set(memberPeople.map(p=>teams.get(String(p.team_id))?.name).filter(Boolean))];
+        return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberCount:memberPeople.length,rawMemberCount:memberRows.length,validForCategory:valid};
+      });
+    }
+
+    const visibleEntries=entries.filter(e=>e.validForCategory!==false);
+    const invalidCount=entries.length-visibleEntries.length;
+    const toolbar=`<div class="anyo-cloud-toolbar"><div><b>ANYO PERFORMERS</b><span class="muted">${selectedCategory?`${visibleEntries.length} eligible entries • ${visibleEntries.reduce((n,e)=>n+(Number(e.memberCount)||0),0)} performers`: 'Select an Anyo category'}</span></div><button type="button" class="btn" id="refreshAnyoPerformersBtn">REFRESH</button></div>`;
+    const warning=(unresolved||orphan||invalidCount)?`<div class="card" style="margin-bottom:16px;border-left:4px solid #d97706"><b>ANYO DATA CHECK</b><div class="muted" style="margin-top:5px">${invalidCount?`${invalidCount} registration(s) were hidden because the performer age/gender does not match this category.`:''}${unresolved?` ${unresolved} registration(s) have unresolved member records.`:''}${orphan?` ${orphan} registration(s) reference a missing category.`:''}</div></div>`:'';
     let cards='';
     if(selectedCategory){
       const c=selectedCategory;
-      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id));
-      const rows=[...rawRows].sort((a,b)=>{const ad=Number(a.drawOrder),bd=Number(b.drawOrder);if(Number.isFinite(ad)&&Number.isFinite(bd))return ad-bd||String(a.number).localeCompare(String(b.number));if(Number.isFinite(ad))return -1;if(Number.isFinite(bd))return 1;return String(a.number).localeCompare(String(b.number));});
+      const rows=[...visibleEntries].sort((a,b)=>{const ad=Number(a.drawOrder),bd=Number(b.drawOrder);if(Number.isFinite(ad)&&Number.isFinite(bd))return ad-bd||String(a.number).localeCompare(String(b.number));if(Number.isFinite(ad))return -1;if(Number.isFinite(bd))return 1;return String(a.number).localeCompare(String(b.number));});
       const body=rows.length?rows.map((e,i)=>{
         const name=e.names.length?e.names.join(' + '):(e.rawMemberCount?`PLAYER RECORD NOT RESOLVED • ${e.number||e.id}`:(e.number||e.id));
         const displayNo=Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):i+1;
         return `<tr><td>${displayNo}</td><td><b>${esc(name)}</b>${e.number?`<div class="muted">${esc(e.number)}</div>`:''}</td><td>${esc(e.team)}</td><td>${esc(e.type)}</td></tr>`;
-      }).join(''):'<tr><td colspan="4" class="empty">No registered performers found for this category.</td></tr>';
+      }).join(''):'<tr><td colspan="4" class="empty">No eligible registered performers found for this category.</td></tr>';
       const table=`<div class="table-wrap"><table><thead><tr><th>#</th><th>PERFORMER / ENTRY</th><th>TEAM</th><th>TYPE</th></tr></thead><tbody>${body}</tbody></table></div>`;
-      const list=rows.length>12?`<details class="anyo-performer-collapse" open><summary><b>PERFORMER LIST</b><span>${rows.length} entries • ${rows.reduce((n,e)=>n + (Number(e.memberCount)||0),0)} performers</span></summary>${table}</details>`:table;
+      const list=rows.length>12?`<details class="anyo-performer-collapse" open><summary><b>PERFORMER LIST</b><span>${rows.length} entries • ${rows.reduce((n,e)=>n+(Number(e.memberCount)||0),0)} performers</span></summary>${table}</details>`:table;
       const division=c.division||'Individual',style=c.style||'Traditional',weapon=c.weapon||'Any';
       const scoreboardUrl=`${location.origin}/anyo-scoreboard/?tournament=${encodeURIComponent(tid)}&categoryId=${encodeURIComponent(c.id)}&category=${encodeURIComponent(c.name)}&division=${encodeURIComponent(division)}&style=${encodeURIComponent(style)}&weapon=${encodeURIComponent(weapon)}&judges=${encodeURIComponent(Number(c.judges)||5)}`;
-      cards=`<div class="card anyo-category-card"><div class="section-header"><div><h3>${esc(c.name)}</h3><p class="muted">${esc(sexLabel(c.gender||'Male'))} • ${esc(division)} • ${esc(style)} • ${esc(weapon)}</p></div><span class="mode-badge">${rows.length} ENTRIES</span></div><div class="anyo-scoreboard-open"><button type="button" class="btn primary" id="openSelectedAnyoScoreboard">ANYO SCOREBOARD</button></div>${list}</div>`;
+      cards=`<div class="card anyo-category-card"><div class="section-header"><div><h3>${esc(c.name)}</h3><p class="muted">${esc(sexLabel(c.gender||'Male'))} • ${esc(categoryLevel(c))} • ${esc(division)} • ${esc(style)} • ${esc(weapon)}</p></div><span class="mode-badge">${rows.length} ENTRIES</span></div><div class="anyo-scoreboard-open"><button type="button" class="btn primary" id="openSelectedAnyoScoreboard">ANYO SCOREBOARD</button></div>${list}</div>`;
       setTimeout(()=>{
         const sel=$('anyoPerformerCategory'); if(sel)sel.value=String(c.id);
         $('openSelectedAnyoScoreboard')?.addEventListener('click',()=>window.open(scoreboardUrl,'_blank','noopener,noreferrer'));
       },0);
     }else cards='<div class="card"><div class="empty">No Anyo categories are available.</div></div>';
     host.innerHTML=toolbar+selector+warning+cards;
-    $('refreshAnyoPerformersBtn')?.addEventListener('click',()=>{__anyoDirectoryRetryCount=0;__anyoCloudLoadKey='';loadAnyoPerformerDirectory();});
-    $('anyoPerformerCategory')?.addEventListener('change',e=>{data.activeCategory=e.target.value||null;renderAnyo();});
+    $('refreshAnyoPerformersBtn')?.addEventListener('click',()=>{__anyoDirectoryRetryCount=0;__anyoCloudLoadKey='';loadAnyoPerformerDirectory({categoryId:selectedCategory?.id||''});});
+    $('anyoPerformerCategory')?.addEventListener('change',e=>{data.activeCategory=e.target.value||null;loadAnyoPerformerDirectory({categoryId:e.target.value||''});});
 
-    // Keep the normal application state synchronized for scoreboards/forms, but
-    // the visible directory above no longer depends on that state being complete.
+    // Keep the normal application state synchronized with the category directory.
+    // Only the selected category's performer rows are copied into the local Anyo
+    // cache; this avoids rebuilding the entire tournament from the database.
     const mappedCats=categories.map(c=>({id:c.id,name:c.name,sex:c.gender||'Male',event:'Arnis Anyo',eventNumber:c.event_number||'',judges:Number(c.judges)||5,preset:c.preset||'',anyoType:c.division||'Individual',anyoStyle:c.style||'Traditional',anyoWeapon:c.weapon||'Any',ageFrom:Number(c.age_min)||0,ageTo:Number(c.age_max)||99,weightFrom:0,weightTo:999,weightRequired:false,bracketBy:null,draw:'random',bracket:null}));
     const catMap=new Map((data.categories||[]).map(c=>[String(c.id),c]));
     mappedCats.forEach(c=>catMap.set(String(c.id),{...(catMap.get(String(c.id))||{}),...c}));
     data.categories=[...catMap.values()];
-    data.players=[...players.values()].map(p=>({id:p.id,number:p.player_number||'',name:[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' '),sex:p.gender||'',age:p.age,weight:p.weight,teamId:p.team_id||'',events:p.events||{}}));
-    data.anyoEntries=entries.map(e=>({id:e.id,number:e.number,type:e.type,categoryId:e.categoryId,style:e.style,weapon:e.weapon,memberIds:(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0)).map(m=>m.player_id),status:'active'}));
+    // Merge the selected category's authoritative entries into the normal local
+    // cache so scoreboards and other existing RADIUM code paths still see them.
+    if(!Array.isArray(data.anyoEntries))data.anyoEntries=[];
+    const selectedEntryMap=new Map(data.anyoEntries.map(e=>[String(e.id),e]));
+    entries.forEach(e=>selectedEntryMap.set(String(e.id),{id:e.id,number:e.number,type:e.type,categoryId:e.categoryId,style:e.style,weapon:e.weapon,memberIds:[],status:'active'}));
+    data.anyoEntries=[...selectedEntryMap.values()];
     __anyoCloudLoadKey=tid;
     __anyoDirectoryRetryCount=0;
   }catch(e){
     console.error('ANYO direct performer directory failed:',e);
-    if(__anyoDirectoryRetryCount<3){const retry=++__anyoDirectoryRetryCount;setTimeout(()=>loadAnyoPerformerDirectory(),700*retry);return;}
+    if(__anyoDirectoryRetryCount<3){const retry=++__anyoDirectoryRetryCount;setTimeout(()=>loadAnyoPerformerDirectory(options),700*retry);return;}
     host.innerHTML=`<div class="card"><div class="empty"><b>ANYO PERFORMER LIST COULD NOT BE LOADED.</b><div style="margin-top:8px">${esc(e?.message||e||'Unknown Supabase error')}</div></div><div style="margin-top:12px"><button type="button" class="btn primary" id="retryAnyoPerformersBtn">RETRY LOAD PERFORMERS</button></div></div>`;
-    $('retryAnyoPerformersBtn')?.addEventListener('click',()=>loadAnyoPerformerDirectory());
+    $('retryAnyoPerformersBtn')?.addEventListener('click',()=>loadAnyoPerformerDirectory(options));
   }finally{__anyoDirectDirectoryLoading=false;}
 }
 
