@@ -160,46 +160,55 @@ async function loadAnyoPerformerDirectory(){
       const members=(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0));
       const people=members.map(m=>players.get(String(m.player_id))).filter(Boolean);
       const names=people.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
-      const ages=people.map(p=>Number(p.age)).filter(Number.isFinite);
       const teamNames=[...new Set(people.map(p=>teams.get(String(p.team_id))?.name).filter(Boolean))];
-      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,ages,team:teamNames.join(' / ')||'No Team',memberCount:people.length,rawMemberCount:members.length};
+      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberCount:people.length,rawMemberCount:members.length};
     });
     const entryIds=new Set(entries.map(e=>String(e.id)));
+    const activeCategories=categories.filter(c=>entries.some(e=>String(e.categoryId)===String(c.id))||categories.length);
     const unresolved=entries.filter(e=>e.rawMemberCount>0&&e.memberCount===0).length;
     const orphan=entries.filter(e=>!categories.some(c=>String(c.id)===String(e.categoryId))).length;
 
-    // IMPORTANT: Elementary and Secondary Anyo age ranges overlap (currently
-    // 1–13 and 1–18). Age therefore cannot be used to decide school level.
-    // The category preset is authoritative; the category name is only a legacy
-    // fallback for older rows that have no preset.
-    const anyoLevelOf=c=>{
-      const preset=String(c?.preset||'').trim().toUpperCase();
-      if(preset==='DEPED-PEKAF-ANYO-ELEMENTARY'||preset.includes('ANYO-ELEMENTARY'))return 'Elementary';
-      if(preset==='DEPED-PEKAF-ANYO-SECONDARY'||preset.includes('ANYO-SECONDARY'))return 'Secondary';
-      const name=String(c?.name||'').trim().toLowerCase();
-      if(/\bsecondary\b/.test(name))return 'Secondary';
-      if(/\belementary\b/.test(name))return 'Elementary';
-      return '';
-    };
-    const categoryAgeRange=c=>{
-      const level=anyoLevelOf(c);
-      if(level==='Elementary')return {min:1,max:13};
-      if(level==='Secondary')return {min:1,max:18};
-      return {min:Number(c?.age_min??0),max:Number(c?.age_max??99)};
-    };
-    const entryValidForCategory=(e,c)=>{
-      if(!c||anyoLevelOf(c)==='')return false;
-      if(!e.memberCount||e.memberCount!==e.rawMemberCount)return false;
-      const range=categoryAgeRange(c);
-      // Every member must satisfy the selected category's age range. This
-      // prevents an accidentally duplicated Elementary/Secondary registration
-      // from appearing in the wrong school-level performance list.
-      return e.ages.length===e.memberCount && e.ages.every(a=>a>=range.min&&a<=range.max);
-    };
-
     const weaponOrder={'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3};
     const divisionOrder={'Individual':1,'Synchronized':2,'Mixed':3};
-    const divisionOf=anyoLevelOf;
+    // Anyo school level must come from the category's explicit preset/level,
+    // never from the overlapping age ranges (Elementary 1-13 / Secondary 1-18).
+    const divisionOf=c=>{
+      const preset=String(c?.preset||'').toUpperCase();
+      const level=String(c?.school_level||c?.level||'').toLowerCase();
+      if(preset.includes('ELEMENTARY')||level==='elementary')return 'Elementary';
+      if(preset.includes('SECONDARY')||level==='secondary')return 'Secondary';
+      return String(c?.name||'').toLowerCase().includes('secondary')?'Secondary':'Elementary';
+    };
+    const anyoEntryHasElementaryRegistration=(entry, allEntries, playerMap, elementaryCategories)=>{
+      const ids=(entry?.memberIds||[]).map(String).filter(Boolean);
+      if(!ids.length)return false;
+      const elementaryIds=new Set(elementaryCategories.map(c=>String(c.id)));
+      return allEntries.some(other=>{
+        if(String(other?.id)===String(entry?.id))return false;
+        if(!elementaryIds.has(String(other?.categoryId)))return false;
+        if(String(other?.type||'Individual').toLowerCase()!==String(entry?.type||'Individual').toLowerCase())return false;
+        if(['deleted','withdrawn'].includes(String(other?.status||'').toLowerCase()))return false;
+        const otherIds=(other?.memberIds||[]).map(String);
+        return ids.some(id=>otherIds.includes(id));
+      });
+    };
+    const secondaryEntryConflictsWithElementary=(entry, category, allEntries, playerMap, elementaryCategories)=>{
+      if(divisionOf(category)!=='Secondary')return false;
+      const memberIds=(entry?.memberIds||[]).map(String).filter(Boolean);
+      if(!memberIds.length)return false;
+      const elementaryMax=Math.max(0,...elementaryCategories.map(c=>Number(c.age_max)).filter(Number.isFinite));
+      if(!elementaryMax)return false;
+      // Only suppress a Secondary duplicate when the same performer/group is
+      // also registered in Elementary AND the member is within the Elementary
+      // age range. This fixes duplicate cross-level registrations without
+      // using age alone to decide school level.
+      const hasElementaryRegistration=anyoEntryHasElementaryRegistration(entry,allEntries,playerMap,elementaryCategories);
+      if(!hasElementaryRegistration)return false;
+      return memberIds.some(id=>{
+        const p=playerMap.get(id);
+        return p&&Number.isFinite(Number(p.age))&&Number(p.age)<=elementaryMax;
+      });
+    };
     const sortedCategories=[...categories].sort((a,b)=>{
       const da=divisionOf(a),db=divisionOf(b); if(da!==db)return da==='Elementary'?-1:1;
       const wa=weaponOrder[a.weapon]||99,wb=weaponOrder[b.weapon]||99; if(wa!==wb)return wa-wb;
@@ -216,7 +225,9 @@ async function loadAnyoPerformerDirectory(){
     let cards='';
     if(selectedCategory){
       const c=selectedCategory;
-      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id)&&entryValidForCategory(e,c));
+      const elementaryCategories=categories.filter(x=>divisionOf(x)==='Elementary');
+      const playerMap=players;
+      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id)&&!secondaryEntryConflictsWithElementary(e,c,entries,playerMap,elementaryCategories));
       const rows=[...rawRows].sort((a,b)=>{const ad=Number(a.drawOrder),bd=Number(b.drawOrder);if(Number.isFinite(ad)&&Number.isFinite(bd))return ad-bd||String(a.number).localeCompare(String(b.number));if(Number.isFinite(ad))return -1;if(Number.isFinite(bd))return 1;return String(a.number).localeCompare(String(b.number));});
       const body=rows.length?rows.map((e,i)=>{
         const name=e.names.length?e.names.join(' + '):(e.rawMemberCount?`PLAYER RECORD NOT RESOLVED • ${e.number||e.id}`:(e.number||e.id));
