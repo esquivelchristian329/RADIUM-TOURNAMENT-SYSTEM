@@ -4,7 +4,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">  
 <title>RADIUM Scoreboard</title>    
 
-  <link rel="stylesheet" href="scoreboard.css">
+  <link rel="stylesheet" href="scoreboard.css?v=20260930v59">
 
 <style id="RADIUM_LOCAL_STYLE_FALLBACK">
   
@@ -363,9 +363,15 @@ button{
 
 .dq-btn,.noshow-btn{width:100%;padding:7px 4px;border-radius:8px;font-weight:900;font-size:clamp(9px,.7vw,12px);cursor:pointer}.dq-btn{background:#ffb000;color:#111}.noshow-btn{background:#333;color:#fff;border:1px solid #777}.penalty:has(button){display:flex;align-items:center;justify-content:center}.penalty:has(button) .dq-btn,.penalty:has(button) .noshow-btn{min-height:35px}
 
-.title-container{display:flex;align-items:center;justify-content:center;gap:10px;width:100%}.scoreboard-logo{width:58px;height:58px;object-fit:contain;flex:0 0 auto;display:none}.title-container .title{flex:1;min-width:0;max-width:70%}@media(max-width:900px){.scoreboard-logo{width:42px;height:42px}.title-container{gap:6px}}
+.title-container{display:flex;align-items:center;justify-content:center;gap:10px;width:100%}.scoreboard-logo{width:58px;height:58px;object-fit:contain;flex:0 0 auto;visibility:hidden}.title-container .title{flex:0 1 auto;min-width:0;max-width:70%;text-align:center;overflow-wrap:anywhere}.score-section{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;width:100%;text-align:center}.score-section .label,.score-section .score-input{align-self:stretch}.score-section .controls{order:3;align-self:center;display:grid!important;grid-template-columns:repeat(2,minmax(64px,1fr));width:min(260px,80%);margin:8px auto 0;gap:8px}.score-section .controls button{width:100%;min-height:48px;padding:8px 14px;font-size:clamp(18px,1.35vw,24px);line-height:1;margin:0}.score-section .champion-text{order:4}@media(max-width:900px){.scoreboard-logo{width:42px;height:42px}.title-container{gap:6px}}
+/* FIX #8 — Combative scoreboard controls */
+.score-section .controls{width:min(260px,80%);margin:10px auto 0;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.score-section .controls button{min-height:48px;padding:8px 14px;font-size:clamp(18px,1.35vw,24px);line-height:1}
+.center>.controls{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:4px 0}
+.center>.controls button{min-width:0;min-height:42px;padding:7px 4px;font-size:clamp(8px,.72vw,12px);line-height:1.05;white-space:normal;overflow-wrap:anywhere}
+@media(max-width:900px){.score-section .controls{width:min(220px,82%)}.center>.controls button{font-size:10px}}
 </style>
-</head>  <body>  <div class="scoreboard">  <div class="title-container" id="scoreboardHeader"><img class="top-logo scoreboard-logo" id="logo1" alt=""><img class="top-logo scoreboard-logo" id="logo2" alt=""><div id="tournamentTitle" class="title" style="font-size:clamp(16px,1.7vw,28px);letter-spacing:2px;max-width:70%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">RADIUM TOURNAMENT</div><img class="top-logo scoreboard-logo" id="logo3" alt=""><img class="top-logo scoreboard-logo" id="logo4" alt=""></div><div class="top">  
+</head>  <body>  <div class="scoreboard">  <div class="title-container" id="scoreboardHeader"><img class="top-logo scoreboard-logo" id="logo1" alt=""><img class="top-logo scoreboard-logo" id="logo2" alt=""><div id="tournamentTitle" class="title" style="font-size:clamp(15px,1.7vw,28px);letter-spacing:2px;max-width:70%;white-space:normal;overflow:visible;text-overflow:clip">RADIUM TOURNAMENT</div><img class="top-logo scoreboard-logo" id="logo3" alt=""><img class="top-logo scoreboard-logo" id="logo4" alt=""></div><div class="top">  
 
     <!-- BLUE -->  
     <div class="panel blue">  
@@ -706,7 +712,7 @@ async function loadCurrentMatch(){
     const round=document.getElementById('round');if(round)round.value=Math.max(1,Math.min(3,Number(currentMatch.round)||1));
     const fmt=document.getElementById('matchFormat');if(fmt)fmt.value=currentMatch.matchFormat==='best3'?'3':'1';
   }
-  if(activeTid()&&window.RADIUM_DB){try{const tr=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:activeTid()},limit:1});const row=tr.data?.[0]||{};const configured=Number(row.settings?.setup?.duration);roundDurationSeconds=Number.isFinite(configured)&&configured>=30?configured:60;remainingMs=roundDurationSeconds*1000;updateTimer();const timerInput=document.getElementById('timer');if(timerInput)timerInput.value=formatTime(roundDurationSeconds*1000);const title=row.name||'RADIUM TOURNAMENT';const te=document.getElementById('tournamentTitle');if(te)te.textContent=title;const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];let permanent=[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:activeTid()},limit:20});permanent=lr.data||[];if(window.RADIUM_DB.state?.client)permanent.forEach(x=>{const u=window.RADIUM_DB.state.client.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const el=document.getElementById('logo'+(i+1));if(el){const src=logos[i]||'';el.src=src;el.style.display=src?'block':'none';el.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
+  if(activeTid()&&window.RADIUM_DB){try{const tr=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:activeTid()},limit:1});const row=tr.data?.[0]||{};const configured=Number(row.settings?.setup?.duration);roundDurationSeconds=Number.isFinite(configured)&&configured>=30?configured:60;remainingMs=roundDurationSeconds*1000;updateTimer();const timerInput=document.getElementById('timer');if(timerInput)timerInput.value=formatTime(roundDurationSeconds*1000);const title=row.name||'RADIUM TOURNAMENT';const te=document.getElementById('tournamentTitle');if(te)te.textContent=title;const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];let permanent=[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:activeTid()},limit:20});permanent=lr.data||[];if(window.RADIUM_DB.state?.client)permanent.forEach(x=>{const u=window.RADIUM_DB.state.client.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const el=document.getElementById('logo'+(i+1));if(el){const src=logos[i]||'';el.src=src;el.style.visibility=src?'visible':'hidden';el.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
   return currentMatch;
 }
 async function saveCombatResultCloud(payload){
