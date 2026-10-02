@@ -407,11 +407,17 @@
     }
     const getAthlete=name=>athletes.get(normalize(name));
     const unmatchedNames=new Set();
-    const addSelection=(name,eventText,groupReference='')=>{
+    const addSelection=(name,eventText,groupReference='',meta={})=>{
       if(!name||/^select from/i.test(name)||/^select (boy|girl)$/i.test(name))return;
       const a=getAthlete(name);if(!a){unmatchedNames.add(name);return;}
       if(!a.events.includes(eventText))a.events.push(eventText);
       if(groupReference&&!a.groupRefs.includes(groupReference))a.groupRefs.push(groupReference);
+      if(meta&&meta.event==='Arnis Anyo'){
+        a.anyoSelections=Array.isArray(a.anyoSelections)?a.anyoSelections:[];
+        const key=[meta.schoolLevel||'',meta.anyoType||'',meta.style||'',meta.weapon||'',groupReference||''].join('|');
+        if(!a.anyoSelections.some(x=>[x.schoolLevel||'',x.anyoType||'',x.style||'',x.weapon||'',x.groupReference||''].join('|')===key))
+          a.anyoSelections.push({schoolLevel:meta.schoolLevel||'',anyoType:meta.anyoType||'',style:meta.style||'',weapon:meta.weapon||'',groupReference:groupReference||''});
+      }
     };
     let section='',grade='',combat=false;
     for(let r=0;r<eventRows.length;r++){
@@ -440,8 +446,8 @@
       const type=/mixed/.test(section)?'Mixed':/synchronized|synchronised/.test(section)?'Synchronized':'Individual';
       const groupReference=type==='Individual'?'':`CAPRISAA-${grade}-${type}`;
       const leftName=cell(eventRows,r,1),rightName=cell(eventRows,r,4);
-      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference);
-      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference);
+      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference,{event:'Arnis Anyo',schoolLevel:grade,anyoType:type,style:'Non-Traditional',weapon});
+      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference,{event:'Arnis Anyo',schoolLevel:grade,anyoType:type,style:'Non-Traditional',weapon});
     }
     if(unmatchedNames.size)throw new Error('These selected names in EVENT REGISTRATION were not found in ATHLETE MASTERLIST: '+[...unmatchedNames].join(', ')+'. Correct the spelling or add the athlete to the masterlist, then upload again.');
     const rows=[];
@@ -452,6 +458,7 @@
         'Full Name':a.name,'Sex':a.sex,'Birthdate':a.birth,'Age':a.age??'',
         'Weight (kg)':a.weight??'','Team / Club':a.team,'Coach Name':a.coach,
         'Events Selected':a.events.join('; '),'Group Name / Group Reference':a.groupRefs.join('; '),
+        __radiumAnyoSelections:a.anyoSelections||[],
         __radiumStructuredWorkbook:true
       });
     }
@@ -490,7 +497,11 @@
 
   function validate(rows){
     if(!Array.isArray(rows))throw new Error('The importer received invalid registration rows. Please choose a valid Excel/CSV/DOCX file.');
-    const players=rows.map(canonicalRow);
+    const players=rows.map((row,i)=>{
+      const r=canonicalRow(row);
+      r.anyoSelections=Array.isArray(row?.__radiumAnyoSelections)?row.__radiumAnyoSelections.map(x=>({...x})):[];
+      return r;
+    });
     const teamsNeedingCreation=new Set();
     const teamsAlreadyKnown=new Set((state().teams||[]).map(t=>String(t.name??t.team_name??'').trim().toLowerCase()).filter(Boolean));
     players.forEach((r,i)=>{
@@ -548,29 +559,93 @@
       let p=playerByName(r.name,t?.id);
       if(!p){p={id:uid(),number:'',name:r.name,nick:r.nick||'',sex:r.sex,age:r.age??'',birth:r.birth||'',weight:r.weight??'',teamId:t?.id||'',coach:r.coach||t?.coach||'',photo:'',events:{combat:false,anyoIndividual:false,anyoTeam:false,livestick:false,anyoIndividualEvents:[],anyoSynchronizedEvents:[]}};s.players.push(p);created++}
       else{p.name=r.name;p.nick=r.nick||p.nick;p.sex=r.sex||p.sex;p.age=r.age??p.age;p.birth=r.birth||p.birth;p.weight=r.weight??p.weight;if(t)p.teamId=t.id;if(r.coach)p.coach=r.coach;updated++}
-      p.events=p.events||{};p.events.anyoIndividualEvents=Array.isArray(p.events.anyoIndividualEvents)?p.events.anyoIndividualEvents:[];p.events.anyoSynchronizedEvents=Array.isArray(p.events.anyoSynchronizedEvents)?p.events.anyoSynchronizedEvents:[];
+      p.events=p.events||{};
+      p.events.anyoIndividualEvents=[];p.events.anyoSynchronizedEvents=[];
+      p.events.anyoIndividualRegistrations=[];p.events.anyoSynchronizedRegistrations=[];
+      p.events.anyoIndividual=false;p.events.anyoTeam=false;
+      p.events.anyoTraditional=false;p.events.anyoNonTraditional=false;
+      p.events.anyoTraditionalWeapons=[];p.events.anyoNonTraditionalWeapons=[];
       for(const sel of r.selections){
         if(sel.event==='Padded Stick')p.events.combat=true;
         else if(sel.event==='Livestick')p.events.livestick=true;
         else if(sel.event==='Arnis Anyo'){
           const combo=`${sel.style}|${sel.weapon}`;
-          if(sel.anyoType==='Individual'){p.events.anyoIndividual=true;if(!p.events.anyoIndividualEvents.includes(combo))p.events.anyoIndividualEvents.push(combo)}
-          else if(sel.anyoType==='Synchronized'){p.events.anyoTeam=true;if(!p.events.anyoSynchronizedEvents.includes(combo))p.events.anyoSynchronizedEvents.push(combo)}
+          if(sel.anyoType==='Individual'){
+            p.events.anyoIndividual=true;
+            if(!p.events.anyoIndividualEvents.includes(combo))p.events.anyoIndividualEvents.push(combo);
+          }else if(sel.anyoType==='Synchronized'){
+            p.events.anyoTeam=true;
+            if(!p.events.anyoSynchronizedEvents.includes(combo))p.events.anyoSynchronizedEvents.push(combo);
+          }
           if(sel.style==='Traditional'){p.events.anyoTraditional=true;p.events.anyoTraditionalWeapons=Array.from(new Set([...(p.events.anyoTraditionalWeapons||[]),sel.weapon]))}
           if(sel.style==='Non-Traditional'){p.events.anyoNonTraditional=true;p.events.anyoNonTraditionalWeapons=Array.from(new Set([...(p.events.anyoNonTraditionalWeapons||[]),sel.weapon]))}
         }
       }
+      // CAPRISAA's Elementary/Secondary sections are the authoritative school
+      // division for Anyo. Store that selection on the player so a later cloud
+      // sync cannot recreate the same athlete in the other overlapping division.
+      const importedAnyo=Array.isArray(r.anyoSelections)?r.anyoSelections:[];
+      p.events.anyoIndividualRegistrations=importedAnyo.filter(x=>x.anyoType==='Individual').map(x=>({schoolLevel:x.schoolLevel||'',style:x.style||'',weapon:x.weapon||'Any'}));
+      p.events.anyoSynchronizedRegistrations=importedAnyo.filter(x=>['Synchronized','Mixed'].includes(x.anyoType)).map(x=>({schoolLevel:x.schoolLevel||'',anyoType:x.anyoType,style:x.style||'',weapon:x.weapon||'Any',groupReference:x.groupReference||''}));
       p.registrationSource='File Import';p.registrationContact=r.contact||p.registrationContact||'';p.email=r.email||p.email||'';p.parentGuardianName=r.parent||p.parentGuardianName||'';p.parentGuardianContact=r.parentContact||p.parentGuardianContact||'';
       p.anyoGroupReference=r.groupReference||p.anyoGroupReference||'';p.anyoGroupMode=r.groupMode||p.anyoGroupMode||'';
       // Keep the coach's explicit Combative category selection even when declared
       // weight is outside that class. Verified weigh-in controls eligibility later.
       s.registrations=Array.isArray(s.registrations)?s.registrations:[];
+      const importedAnyoIndividualKeys=new Set();
+      for(const sel of (r.selections||[])){
+        if(sel.event!=='Arnis Anyo'||sel.anyoType!=='Individual')continue;
+        const matches=(s.categories||[]).filter(c=>categoryEligibleForPlayer(c,r,sel));
+        let chosen=matches;
+        if(matches.length>1&&sel.schoolLevel){
+          const level=String(sel.schoolLevel).toLowerCase();
+          chosen=matches.filter(c=>{
+            const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
+            const cl=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'secondary':'';
+            return cl===level;
+          });
+        }
+        if(chosen.length===1)importedAnyoIndividualKeys.add(String(p.id)+'|'+String(chosen[0].id));
+      }
+      // The uploaded registration workbook is authoritative for these players.
+      // Remove stale Anyo individual registrations from an earlier import before
+      // adding the exact selected category. This is what prevents Hanz-like
+      // athletes from remaining in both Elementary and Secondary.
+      s.registrations=s.registrations.filter(x=>{
+        const key=String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'');
+        const c=(s.categories||[]).find(cat=>String(cat.id)===String(x.categoryId||x.category_id||''));
+        if(String(x.playerId||x.player_id||'')!==String(p.id))return true;
+        if(c?.event==='Arnis Anyo'&&(c.anyoType||'Individual')==='Individual')return importedAnyoIndividualKeys.has(key);
+        return true;
+      });
+      // Preserve the exact Anyo category selected by the registration file.
+      // Elementary and Secondary Anyo age ranges overlap, so player age alone
+      // must never create registrations in both school divisions.
+      const addRegistration=(c,anyoEntryId=null)=>{
+        if(!c)return;
+        const key=String(p.id)+'|'+String(c.id);
+        if(!s.registrations.some(x=>String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'')===key&& !['CANCELLED','DELETED','WITHDRAWN'].includes(String(x.status||'ACTIVE').toUpperCase())))
+          s.registrations.push({id:null,teamId:p.teamId||'',playerId:p.id,categoryId:c.id,anyoEntryId, status:'ACTIVE',feeAmount:Number(c.registrationFee)||0,registeredAt:new Date().toISOString()});
+      };
       for(const choice of (r.categorySelections||[])){
         const c=(s.categories||[]).find(x=>String(x.id)===String(choice.id));
         if(!c||choice.event==='Arnis Anyo'||choice.event==='Livestick')continue;
-        const key=String(p.id)+'|'+String(c.id);
-        if(!s.registrations.some(x=>String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'')===key&& !['CANCELLED','DELETED','WITHDRAWN'].includes(String(x.status||'ACTIVE').toUpperCase())))
-          s.registrations.push({id:null,teamId:p.teamId||'',playerId:p.id,categoryId:c.id,anyoEntryId:null,status:'ACTIVE',feeAmount:Number(c.registrationFee)||0,registeredAt:new Date().toISOString()});
+        addRegistration(c);
+      }
+      for(const sel of (r.selections||[])){
+        if(sel.event!=='Arnis Anyo'||sel.anyoType!=='Individual')continue;
+        const matches=(s.categories||[]).filter(c=>categoryEligibleForPlayer(c,r,sel));
+        if(matches.length===1){
+          addRegistration(matches[0]);
+        }else if(matches.length>1 && sel.schoolLevel){
+          const level=String(sel.schoolLevel).toLowerCase();
+          const levelMatches=matches.filter(c=>{
+            const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
+            const cl=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'secondary':'';
+            return cl===level;
+          });
+          if(levelMatches.length===1)addRegistration(levelMatches[0]);
+        }
       }
       registrations+=r.categories.length;
     }
@@ -583,7 +658,17 @@
       const p=playerByName(r.name,teamByName(r.team)?.id); if(!p)continue;
       for(const sel of (r.selections||[])){
         if(sel.event!=='Arnis Anyo'||!['Synchronized','Mixed'].includes(sel.anyoType))continue;
-        const matches=(state().categories||[]).filter(c=>String(c.event)==='Arnis Anyo'&&String(c.anyoType||'')===String(sel.anyoType)&&String(c.anyoStyle||'Traditional')===String(sel.style||'Traditional')&&(String(c.anyoWeapon||'Any')==='Any'||String(c.anyoWeapon)===String(sel.weapon||'Any'))&&((c.sex==='Mixed')||c.sex===p.sex));
+        const matches=(state().categories||[]).filter(c=>{
+          if(String(c.event)!=='Arnis Anyo')return false;
+          if(String(c.anyoType||'')!==String(sel.anyoType))return false;
+          if(String(c.anyoStyle||'Traditional')!==String(sel.style||'Traditional'))return false;
+          if(String(c.anyoWeapon||'Any')!=='Any'&&String(c.anyoWeapon)!==String(sel.weapon||'Any'))return false;
+          if(c.sex!=='Mixed'&&c.sex!==p.sex)return false;
+          const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
+          const categoryLevel=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'Elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'Secondary':'';
+          if(sel.schoolLevel&&categoryLevel&&String(sel.schoolLevel)!==categoryLevel)return false;
+          return true;
+        });
         for(const c of matches){
           const key=[p.teamId||'',String(r.groupReference).trim().toLowerCase(),c.id].join('|');
           if(!groups.has(key))groups.set(key,{category:c,reference:String(r.groupReference).trim(),players:[]});

@@ -138,14 +138,15 @@ async function loadAnyoPerformerDirectory(){
     }
     // Do not depend on cloud-sync state. The ANYO page reads the authoritative
     // tournament rows directly, which avoids the old empty-list state problem.
-    const [cr,er,mr,pr,tr]=await Promise.all([
+    const [cr,er,mr,pr,tr,rr]=await Promise.all([
       window.RADIUM_DB.select('categories',{select:'id,name,event_type,gender,event_number,judges,preset,division,style,weapon,age_min,age_max,status',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('anyo_entries',{select:'id,tournament_id,category_id,entry_type,entry_number,style,weapon,group_reference,status,draw_order,draw_type,drawn_at',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('anyo_entry_members',{select:'entry_id,tournament_id,player_id,member_position',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}})
+      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}}),
+      window.RADIUM_DB.select('category_registrations',{select:'id,category_id,anyo_entry_id,player_id,status',eq:{tournament_id:tid}})
     ]);
-    for(const q of [cr,er,mr,pr,tr])if(q?.error)throw q.error;
+    for(const q of [cr,er,mr,pr,tr,rr])if(q?.error)throw q.error;
 
     const categories=(cr.data||[]).filter(c=>String(c.event_type||'').trim().toLowerCase()==='anyo');
     const players=new Map((pr.data||[]).map(p=>[String(p.id),p]));
@@ -156,7 +157,17 @@ async function loadAnyoPerformerDirectory(){
       if(!membersByEntry.has(k))membersByEntry.set(k,[]);
       membersByEntry.get(k).push(m);
     });
-    const entries=(er.data||[]).filter(e=>!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())).map(e=>{
+    const activeRegistrationRows=(rr.data||[]).filter(r=>!['CANCELLED','DELETED','WITHDRAWN','NO_SHOW'].includes(String(r.status||'ACTIVE').toUpperCase()));
+    const registeredEntryIds=new Set(activeRegistrationRows.filter(r=>r.anyo_entry_id).map(r=>String(r.anyo_entry_id)));
+    const registeredPlayerCategoryKeys=new Set(activeRegistrationRows.filter(r=>r.player_id).map(r=>String(r.player_id)+'|'+String(r.category_id)));
+    const entries=(er.data||[]).filter(e=>!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())).filter(e=>{
+      const type=String(e.entry_type||'Individual');
+      if(type==='Individual'){
+        const memberIds=(membersByEntry.get(String(e.id))||[]).map(m=>String(m.player_id));
+        return registeredEntryIds.has(String(e.id)) || memberIds.some(pid=>registeredPlayerCategoryKeys.has(pid+'|'+String(e.category_id)));
+      }
+      return registeredEntryIds.has(String(e.id));
+    }).map(e=>{
       const members=(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0));
       const people=members.map(m=>players.get(String(m.player_id))).filter(Boolean);
       const names=people.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
@@ -234,9 +245,7 @@ async function loadAnyoPerformerDirectory(){
     let cards='';
     if(selectedCategory){
       const c=selectedCategory;
-      const elementaryCategories=categories.filter(x=>divisionOf(x)==='Elementary');
-      const playerMap=players;
-      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id)&&!secondaryEntryConflictsWithElementary(e,c,entries,playerMap,elementaryCategories));
+      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id));
       const rows=[...rawRows].sort((a,b)=>{const ad=Number(a.drawOrder),bd=Number(b.drawOrder);if(Number.isFinite(ad)&&Number.isFinite(bd))return ad-bd||String(a.number).localeCompare(String(b.number));if(Number.isFinite(ad))return -1;if(Number.isFinite(bd))return 1;return String(a.number).localeCompare(String(b.number));});
       const body=rows.length?rows.map((e,i)=>{
         const name=e.names.length?e.names.join(' + '):(e.rawMemberCount?`PLAYER RECORD NOT RESOLVED • ${e.number||e.id}`:(e.number||e.id));
