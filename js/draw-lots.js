@@ -19,49 +19,68 @@
   }
   function categories(){const d=state();return d?(d.categories||[]).filter(c=>isDepEdTournament()&&(isAnyo(c)||isCombative(c))):[];}
   function categoryDivision(c){
-    // Anyo school level comes from the explicit category preset/level.
-    // Do not use age because Elementary 1-13 and Secondary 1-18 overlap.
+    // DepEd-PEKAF Combative is a secondary/high-school-only event.
+    // Do not infer its division from the category name because the official
+    // category names (e.g. Boys 12–17 / weight classes) do not contain
+    // the word "Secondary". Anyo categories still use their explicit
+    // Elementary/Secondary naming.
     if(isDepEdTournament() && isCombative(c)) return 'Secondary';
-    const preset=String(c?.preset||'').toUpperCase();
-    const level=String(c?.school_level||c?.level||'').toLowerCase();
-    if(preset.includes('ELEMENTARY')||level==='elementary')return 'Elementary';
-    if(preset.includes('SECONDARY')||level==='secondary')return 'Secondary';
     const n=String(c?.name||'').toLowerCase();
     return n.includes('secondary')?'Secondary':'Elementary';
-  }
-  function secondaryAnyoDuplicateOfElementary(entry,c,d){
-    if(categoryDivision(c)!=='Secondary')return false;
-    const ids=(entry?.memberIds||[]).map(String).filter(Boolean);
-    if(!ids.length)return false;
-    const elementaryCats=(d.categories||[]).filter(x=>isAnyo(x)&&categoryDivision(x)==='Elementary');
-    const elementaryIds=new Set(elementaryCats.map(x=>String(x.id)));
-    const elementaryMax=Math.max(0,...elementaryCats.map(x=>Number(x.ageTo??x.age_max)).filter(Number.isFinite));
-    if(!elementaryIds.size||!elementaryMax)return false;
-    const entries=(d.anyoEntries||[]);
-    const hasElementary=entries.some(other=>String(other.id)!==String(entry.id)&&elementaryIds.has(String(other.categoryId))&&!['deleted','withdrawn'].includes(String(other.status||'').toLowerCase())&&ids.some(id=>(other.memberIds||[]).map(String).includes(id)));
-    if(!hasElementary)return false;
-    return ids.some(id=>{const p=(d.players||[]).find(x=>String(x.id)===id);return p&&Number.isFinite(Number(p.age))&&Number(p.age)<=elementaryMax;});
   }
   function weaponRank(c){return ({'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3})[String(c?.weapon||'')]||99;}
   function sortedCategories(list){return [...list].sort((a,b)=>{const da=categoryDivision(a),db=categoryDivision(b);if(da!==db)return da==='Elementary'?-1:1;const wa=weaponRank(a),wb=weaponRank(b);if(wa!==wb)return wa-wb;return String(a.name||'').localeCompare(String(b.name||''));});}
   function selected(){const d=state();return d?.categories?.find(c=>String(c.id)===String($('drawLotsCategory')?.value))||null;}
   function teamName(id){const d=state();return d?.teams?.find(t=>String(t.id)===String(id))?.name||'—';}
+  function anyoAgeOK(p,c){
+    const a=Number(p?.age);if(!Number.isFinite(a))return false;
+    const label=(String(c?.preset||'')+' '+String(c?.name||'')).toLowerCase();
+    if(label.includes('elementary'))return a>=1&&a<=12;
+    if(label.includes('secondary'))return a>=13&&a<=17;
+    return a>=Number(c?.ageFrom||0)&&a<=Number(c?.ageTo||99);
+  }
+  function anyoComboOK(p,c,type){
+    const e=p?.events||{};
+    const combos=Array.isArray(e[type==='Individual'?'anyoIndividualEvents':'anyoSynchronizedEvents'])?e[type==='Individual'?'anyoIndividualEvents':'anyoSynchronizedEvents']:[];
+    if(!c.anyoWeapon||c.anyoWeapon==='Any')return true;
+    const wanted=`${c.anyoStyle||'Traditional'}|${c.anyoWeapon}`;
+    if(combos.length)return combos.includes(wanted);
+    const key=(c.anyoStyle||'Traditional')==='Traditional'?'anyoTraditionalWeapons':'anyoNonTraditionalWeapons';
+    return Array.isArray(e[key])&&e[key].includes(c.anyoWeapon);
+  }
+  function localAnyoRegistrationPlayerIds(c){
+    const d=state();if(!d)return new Set();
+    return new Set((d.registrations||[]).filter(r=>String(r.categoryId||r.category_id)===String(c.id)&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'ACTIVE').toUpperCase())&&r.playerId).map(r=>String(r.playerId)));
+  }
   function competitors(c){
     const d=state();if(!d||!c)return [];
     if(isAnyo(c)){
-      if((c.anyoType||'Individual')==='Individual'){
+      const type=c.anyoType||'Individual';
+      if(type==='Individual'){
+        const registeredIds=localAnyoRegistrationPlayerIds(c);
         const rows=[];
         for(const p of d.players||[]){
-          if(!eligible(p,c)||p.events?.anyoIndividual!==true)continue;
-          let e=(d.anyoEntries||[]).find(x=>String(x.categoryId)===String(c.id)&&x.type==='Individual'&&x.memberIds?.[0]===p.id&&x.status!=='deleted');
-          if(e&&secondaryAnyoDuplicateOfElementary(e,c,d))continue;
+          // For Anyo, an explicit category registration is authoritative. The
+          // legacy player.events flags are only a fallback for older records.
+          const explicitlyRegistered=registeredIds.has(String(p.id));
+          const legacyRegistered=p.events?.anyoIndividual===true;
+          if(!explicitlyRegistered&&!legacyRegistered)continue;
+          if(!anyoAgeOK(p,c)|| (c.sex&&c.sex!=='Mixed'&&c.sex!==p.sex))continue;
+          if(!anyoComboOK(p,c,'Individual'))continue;
+          let e=(d.anyoEntries||[]).find(x=>String(x.categoryId)===String(c.id)&&x.type==='Individual'&&x.memberIds?.some(id=>String(id)===String(p.id))&&x.status!=='deleted');
           if(!e)e={id:`tmp-${c.id}-${p.id}`,memberIds:[p.id],number:p.number||p.id};
           const cs=p.categorySeeds?.[c.id]||{};
           rows.push({kind:'player',id:p.id,name:p.name,teamId:p.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):(Number.isFinite(Number(cs.drawNumber))?Number(cs.drawNumber):null),player:p,entry:e});
         }
         return rows;
       }
-      return (d.anyoEntries||[]).filter(e=>String(e.categoryId)===String(c.id)&&e.type===(c.anyoType||'Synchronized')&&!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())&&!secondaryAnyoDuplicateOfElementary(e,c,d)).map(e=>({kind:'entry',id:e.id,name:e.number||e.id,teamId:(e.memberIds||[]).map(id=>(d.players||[]).find(p=>String(p.id)===String(id))).find(Boolean)?.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):null,entry:e}));
+      return (d.anyoEntries||[]).filter(e=>String(e.categoryId)===String(c.id)&&e.type===type&&e.status!=='deleted').filter(e=>{
+        const members=(e.memberIds||[]).map(id=>(d.players||[]).find(p=>String(p.id)===String(id))).filter(Boolean);
+        if(!members.length)return false;
+        const max=type==='Synchronized'?3:2;
+        if(members.length<2||members.length>max)return false;
+        return members.every(p=>anyoAgeOK(p,c))&&(c.sex==='Mixed'||!c.sex||members.every(p=>(p.sex||p.gender)===c.sex));
+      }).map(e=>({kind:'entry',id:e.id,name:e.number||e.id,teamId:(e.memberIds||[]).map(id=>(d.players||[]).find(p=>String(p.id)===String(id))).find(Boolean)?.teamId||'',draw:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):null,entry:e}));
     }
     // Combative draw lots must use the same authoritative roster as the bracket:
     // active category registration + verified weigh-in. This makes the saved seed
@@ -191,10 +210,71 @@
       if(d&&String(d.activeCategory||'')===String(c.id))renderSelected({skipHydrate:true});
     }catch(e){console.warn('Saved draw hydration failed:',e);}
   }
+  let anyoCloudHydrationToken=0;
+  async function hydrateAnyoRosterFromCloud(c){
+    if(!isAnyo(c)||!window.RADIUM_DB)return false;
+    const token=++anyoCloudHydrationToken;
+    try{
+      const init=await window.RADIUM_DB.init();if(!init?.enabled)return false;
+      const tid=String(window.RADIUM_CLOUD?.getId?.()||state()?.tournamentId||'');if(!tid)return false;
+      const [er,rr,pr,mr]=await Promise.all([
+        window.RADIUM_DB.select('anyo_entries',{select:'id,category_id,entry_type,entry_number,style,weapon,draw_order,draw_type,drawn_at,status,group_reference',eq:{tournament_id:tid,category_id:c.id}}),
+        window.RADIUM_DB.select('category_registrations',{select:'id,player_id,anyo_entry_id,status,category_id,team_id',eq:{tournament_id:tid,category_id:c.id}}),
+        window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status,events',eq:{tournament_id:tid}}),
+        window.RADIUM_DB.select('anyo_entry_members',{select:'entry_id,player_id,member_position',eq:{tournament_id:tid}})
+      ]);
+      if(er?.error||rr?.error||pr?.error||mr?.error)throw er?.error||rr?.error||pr?.error||mr?.error;
+      if(token!==anyoCloudHydrationToken)return false;
+      const d=state();if(!d)return false;
+      const players=new Map((pr.data||[]).map(p=>[String(p.id),p]));
+      const localPlayers=d.players||[];
+      for(const p of localPlayers){
+        const cp=players.get(String(p.id));if(!cp)continue;
+        if(cp.events&&typeof cp.events==='object'&&Object.keys(cp.events).length)p.events={...p.events,...cp.events};
+        if(cp.team_id)p.teamId=cp.team_id;
+        if(cp.age!=null)p.age=Number(cp.age)||p.age;
+        if(cp.gender)p.sex=cp.gender;
+      }
+      const membersByEntry=new Map();
+      for(const m of mr.data||[]){const k=String(m.entry_id);if(!membersByEntry.has(k))membersByEntry.set(k,[]);membersByEntry.get(k).push(m);}
+      const cloudEntries=(er.data||[]).filter(e=>!['DELETED','WITHDRAWN','CANCELLED'].includes(String(e.status||'').toUpperCase())).map(e=>({
+        id:e.id,number:e.entry_number||e.id,type:e.entry_type||'Individual',categoryId:e.category_id,style:e.style||c.anyoStyle||'Traditional',weapon:e.weapon||c.anyoWeapon||'Any',groupReference:e.group_reference||'',memberIds:(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0)).map(m=>m.player_id),drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,drawType:e.draw_type||null,drawnAt:e.drawn_at||null,status:String(e.status||'active').toLowerCase()}));
+      const regPlayers=(rr.data||[]).filter(r=>r.player_id&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase())).map(r=>String(r.player_id));
+      // Build missing Individual entries from the authoritative category registration.
+      // This repairs the common case where category_registrations was saved before
+      // anyo_entries was created. It never guesses a player for an orphan row whose
+      // player_id is NULL.
+      if((c.anyoType||'Individual')==='Individual'){
+        for(const pid of regPlayers){
+          const p=localPlayers.find(x=>String(x.id)===pid);if(!p)continue;
+          if(!cloudEntries.some(e=>e.type==='Individual'&&e.memberIds.some(x=>String(x)===pid))){
+            const num=p.number||p.id.slice(0,6).toUpperCase();
+            cloudEntries.push({id:`tmp-${c.id}-${pid}`,number:num,type:'Individual',categoryId:c.id,style:c.anyoStyle||'Traditional',weapon:c.anyoWeapon||'Any',groupReference:'',memberIds:[p.id],drawOrder:null,drawType:null,drawnAt:null,status:'active'});
+          }
+        }
+      }
+      d.anyoEntries=Array.isArray(d.anyoEntries)?d.anyoEntries:[];
+      // Replace only entries for this Anyo category; Combative data is untouched.
+      d.anyoEntries=d.anyoEntries.filter(e=>String(e.categoryId)!==String(c.id));
+      d.anyoEntries.push(...cloudEntries);
+      // Rebuild the local registration rows for players that are explicitly linked.
+      d.registrations=Array.isArray(d.registrations)?d.registrations:[];
+      const otherRegs=d.registrations.filter(r=>String(r.categoryId)!==String(c.id));
+      const categoryRegs=(rr.data||[]).map(r=>({id:r.id,teamId:r.team_id||'',playerId:r.player_id||'',categoryId:r.category_id,anyoEntryId:r.anyo_entry_id||null,status:String(r.status||'ACTIVE').toUpperCase()}));
+      d.registrations=[...otherRegs,...categoryRegs];
+      window.__RADIUM_SET_DATA?.(d);
+      return true;
+    }catch(e){console.warn('Anyo cloud roster hydration failed:',e);return false;}
+  }
   function renderSelected(options={}){
     const c=selected(),info=$('drawLotsInfo'),tb=$('drawLotsTable'),status=$('drawLotsStatus');
     if(!c){if(info)info.innerHTML='<strong>Select a category.</strong> The Tournament Manager records the physical draw result here.';if(tb)tb.innerHTML='<tr><td colspan="5" class="draw-lots-empty">No category selected.</td></tr>';if(status)status.textContent='NOT DRAWN';return;}
     const list=competitors(c),any=isAnyo(c),type=any?(c.anyoType||'Individual'):'Combative';
+    if(any&&!options.skipCloudHydrate){
+      hydrateAnyoRosterFromCloud(c).then(changed=>{
+        if(changed&&selected()&&String(selected().id)===String(c.id))renderSelected({skipCloudHydrate:true});
+      });
+    }
     if(!options.skipHydrate)hydrateSavedDraw(c,list);
     if(info)info.innerHTML=any?`<strong>DepEd Anyo:</strong> Coaches physically draw numbered papers. Enter each drawn number for <b>${esc(c.name)}</b>. The order is independent for this category.`:`<strong>DepEd Combative:</strong> Coaches physically draw seed numbers for <b>${esc(c.name)}</b>. Enter each drawn seed below; the bracket will use these category-specific seeds.`;
     const drawn=list.length>0&&list.every(x=>Number.isInteger(x.draw)&&x.draw>=1&&x.draw<=list.length)&&new Set(list.map(x=>x.draw)).size===list.length;

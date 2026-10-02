@@ -115,7 +115,7 @@
     const sessionResult=await window.RADIUM_DB.session();
     const token=sessionResult?.data?.session?.access_token;
     if(!token)throw new Error('Your RADIUM staff session has expired. Sign in again before using AI import understanding.');
-    const categories=(state().categories||[]).map(c=>({name:c.name,preset:c.preset,event:c.event,event_type:c.event_type,sex:c.sex,gender:c.gender,ageFrom:c.ageFrom,ageTo:c.ageTo,age_min:c.age_min,age_max:c.age_max,weightFrom:c.weightFrom,weightTo:c.weightTo,weight_min:c.weight_min,weight_max:c.weight_max,anyoType:c.anyoType,anyoStyle:c.anyoStyle,anyoWeapon:c.anyoWeapon,division:c.division,style:c.style,weapon:c.weapon}));
+    const categories=(state().categories||[]).map(c=>({name:c.name,event:c.event,event_type:c.event_type,sex:c.sex,gender:c.gender,ageFrom:c.ageFrom,ageTo:c.ageTo,age_min:c.age_min,age_max:c.age_max,weightFrom:c.weightFrom,weightTo:c.weightTo,weight_min:c.weight_min,weight_max:c.weight_max,anyoType:c.anyoType,anyoStyle:c.anyoStyle,anyoWeapon:c.anyoWeapon,division:c.division,style:c.style,weapon:c.weapon}));
     const base=String(window.RADIUM_SUPABASE_CONFIG.url).replace(/\/+$/,'');
     const res=await fetch(base+'/functions/v1/radium-ai-import',{method:'POST',headers:{'Content-Type':'application/json','apikey':window.RADIUM_SUPABASE_CONFIG.anonKey||'','Authorization':'Bearer '+token},body:JSON.stringify({rows:rawRows,categories})});
     const data=await res.json().catch(()=>({}));
@@ -140,8 +140,7 @@
 
   function parseEventChoice(choice){
     const x=normalize(choice),out=[];
-    const schoolLevel=/\belementary\b/.test(x)?'Elementary':/\bsecondary\b/.test(x)?'Secondary':'';
-    const add=(event,anyoType='',style='',weapon='')=>out.push({event,anyoType,style,weapon,schoolLevel,label:String(choice),weightRange:parseWeightRange(choice)});
+    const add=(event,anyoType='',style='',weapon='')=>out.push({event,anyoType,style,weapon,label:String(choice),weightRange:parseWeightRange(choice)});
     const isAnyo=/anyo|likha|form|forms|kata/.test(x)&&(/single|double|espada|sword|dagger|traditional|trad\b|non[- ]?trad|synchronized|sync|mixed|solo|weapon/.test(x));
     const style=/non[- ]?trad|modern|freestyle/.test(x)?'Non-Traditional':/traditional|trad\b|classic|old[- ]?style/.test(x)?'Traditional':'';
     let weapon='';
@@ -161,7 +160,7 @@
     const pieces=split(raw); let out=[];
     pieces.forEach(p=>{const q=parseEventChoice(p);if(q.length)out.push(...q)});
     if(!out.length&&raw){const q=parseEventChoice(raw);if(q.length)out=q}
-    const seen=new Set();return out.filter(e=>{const k=[e.event,e.schoolLevel,e.anyoType,e.style,e.weapon].join('|');if(seen.has(k))return false;seen.add(k);return true});
+    const seen=new Set();return out.filter(e=>{const k=[e.event,e.anyoType,e.style,e.weapon].join('|');if(seen.has(k))return false;seen.add(k);return true});
   }
 
   function isDepEdPEKAF(){return String(state().setup?.competitionProgram||'').toUpperCase()==='DEPED_PEKAF';}
@@ -178,16 +177,8 @@
     // age range. Their preset is authoritative for Elementary/Secondary matching.
     let ageFrom=Number(c.ageFrom??c.age_min??0), ageTo=Number(c.ageTo??c.age_max??99);
     const preset=String(c.preset??'').toUpperCase();
-    const categoryName=String(c.name??'');
-    const categoryLevel=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(categoryName)?'Elementary':
-      preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(categoryName)?'Secondary':'';
-    // The CAPRISAA workbook explicitly separates Elementary and Secondary
-    // event sections. Use that section as a matching constraint because the
-    // configured age ranges overlap (Elementary 1–13, Secondary 1–18).
-    const requestedLevel=String(sel?.schoolLevel||'');
-    if(requestedLevel&&categoryLevel&&requestedLevel!==categoryLevel)return false;
-    if(preset.includes('ANYO-ELEMENTARY')){ ageFrom=1; ageTo=13; }
-    else if(preset.includes('ANYO-SECONDARY')){ ageFrom=1; ageTo=18; }
+    if(preset.includes('ANYO-ELEMENTARY')){ ageFrom=1; ageTo=12; }
+    else if(preset.includes('ANYO-SECONDARY')){ ageFrom=13; ageTo=17; }
     const weightFrom=Number(c.weightFrom??c.weight_min??0), weightTo=Number(c.weightTo??c.weight_max??999);
     const weightRequired=isDepEdPEKAF() && cEvent!=='Arnis Anyo' ? true : !!(c.weightRequired||c.requireWeight||c.weight_required||weightFrom>0||weightTo<999);
     const anyoType=c.anyoType??c.division??'Individual';
@@ -407,17 +398,11 @@
     }
     const getAthlete=name=>athletes.get(normalize(name));
     const unmatchedNames=new Set();
-    const addSelection=(name,eventText,groupReference='',meta={})=>{
+    const addSelection=(name,eventText,groupReference='')=>{
       if(!name||/^select from/i.test(name)||/^select (boy|girl)$/i.test(name))return;
       const a=getAthlete(name);if(!a){unmatchedNames.add(name);return;}
       if(!a.events.includes(eventText))a.events.push(eventText);
       if(groupReference&&!a.groupRefs.includes(groupReference))a.groupRefs.push(groupReference);
-      if(meta&&meta.event==='Arnis Anyo'){
-        a.anyoSelections=Array.isArray(a.anyoSelections)?a.anyoSelections:[];
-        const key=[meta.schoolLevel||'',meta.anyoType||'',meta.style||'',meta.weapon||'',groupReference||''].join('|');
-        if(!a.anyoSelections.some(x=>[x.schoolLevel||'',x.anyoType||'',x.style||'',x.weapon||'',x.groupReference||''].join('|')===key))
-          a.anyoSelections.push({schoolLevel:meta.schoolLevel||'',anyoType:meta.anyoType||'',style:meta.style||'',weapon:meta.weapon||'',groupReference:groupReference||''});
-      }
     };
     let section='',grade='',combat=false;
     for(let r=0;r<eventRows.length;r++){
@@ -446,8 +431,8 @@
       const type=/mixed/.test(section)?'Mixed':/synchronized|synchronised/.test(section)?'Synchronized':'Individual';
       const groupReference=type==='Individual'?'':`CAPRISAA-${grade}-${type}`;
       const leftName=cell(eventRows,r,1),rightName=cell(eventRows,r,4);
-      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference,{event:'Arnis Anyo',schoolLevel:grade,anyoType:type,style:'Non-Traditional',weapon});
-      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo ${grade}`,groupReference,{event:'Arnis Anyo',schoolLevel:grade,anyoType:type,style:'Non-Traditional',weapon});
+      if(leftName&&!/^select from/i.test(leftName))addSelection(leftName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo`,groupReference);
+      if(rightName&&!/^select from/i.test(rightName))addSelection(rightName,`Arnis Anyo ${type} Non-Traditional ${weapon} Anyo`,groupReference);
     }
     if(unmatchedNames.size)throw new Error('These selected names in EVENT REGISTRATION were not found in ATHLETE MASTERLIST: '+[...unmatchedNames].join(', ')+'. Correct the spelling or add the athlete to the masterlist, then upload again.');
     const rows=[];
@@ -458,7 +443,6 @@
         'Full Name':a.name,'Sex':a.sex,'Birthdate':a.birth,'Age':a.age??'',
         'Weight (kg)':a.weight??'','Team / Club':a.team,'Coach Name':a.coach,
         'Events Selected':a.events.join('; '),'Group Name / Group Reference':a.groupRefs.join('; '),
-        __radiumAnyoSelections:a.anyoSelections||[],
         __radiumStructuredWorkbook:true
       });
     }
@@ -497,11 +481,7 @@
 
   function validate(rows){
     if(!Array.isArray(rows))throw new Error('The importer received invalid registration rows. Please choose a valid Excel/CSV/DOCX file.');
-    const players=rows.map((row,i)=>{
-      const r=canonicalRow(row);
-      r.anyoSelections=Array.isArray(row?.__radiumAnyoSelections)?row.__radiumAnyoSelections.map(x=>({...x})):[];
-      return r;
-    });
+    const players=rows.map(canonicalRow);
     const teamsNeedingCreation=new Set();
     const teamsAlreadyKnown=new Set((state().teams||[]).map(t=>String(t.name??t.team_name??'').trim().toLowerCase()).filter(Boolean));
     players.forEach((r,i)=>{
@@ -559,93 +539,65 @@
       let p=playerByName(r.name,t?.id);
       if(!p){p={id:uid(),number:'',name:r.name,nick:r.nick||'',sex:r.sex,age:r.age??'',birth:r.birth||'',weight:r.weight??'',teamId:t?.id||'',coach:r.coach||t?.coach||'',photo:'',events:{combat:false,anyoIndividual:false,anyoTeam:false,livestick:false,anyoIndividualEvents:[],anyoSynchronizedEvents:[]}};s.players.push(p);created++}
       else{p.name=r.name;p.nick=r.nick||p.nick;p.sex=r.sex||p.sex;p.age=r.age??p.age;p.birth=r.birth||p.birth;p.weight=r.weight??p.weight;if(t)p.teamId=t.id;if(r.coach)p.coach=r.coach;updated++}
-      p.events=p.events||{};
-      p.events.anyoIndividualEvents=[];p.events.anyoSynchronizedEvents=[];
-      p.events.anyoIndividualRegistrations=[];p.events.anyoSynchronizedRegistrations=[];
-      p.events.anyoIndividual=false;p.events.anyoTeam=false;
-      p.events.anyoTraditional=false;p.events.anyoNonTraditional=false;
-      p.events.anyoTraditionalWeapons=[];p.events.anyoNonTraditionalWeapons=[];
+      p.events=p.events||{};p.events.anyoIndividualEvents=Array.isArray(p.events.anyoIndividualEvents)?p.events.anyoIndividualEvents:[];p.events.anyoSynchronizedEvents=Array.isArray(p.events.anyoSynchronizedEvents)?p.events.anyoSynchronizedEvents:[];
       for(const sel of r.selections){
         if(sel.event==='Padded Stick')p.events.combat=true;
         else if(sel.event==='Livestick')p.events.livestick=true;
         else if(sel.event==='Arnis Anyo'){
           const combo=`${sel.style}|${sel.weapon}`;
-          if(sel.anyoType==='Individual'){
-            p.events.anyoIndividual=true;
-            if(!p.events.anyoIndividualEvents.includes(combo))p.events.anyoIndividualEvents.push(combo);
-          }else if(sel.anyoType==='Synchronized'){
-            p.events.anyoTeam=true;
-            if(!p.events.anyoSynchronizedEvents.includes(combo))p.events.anyoSynchronizedEvents.push(combo);
-          }
+          if(sel.anyoType==='Individual'){p.events.anyoIndividual=true;if(!p.events.anyoIndividualEvents.includes(combo))p.events.anyoIndividualEvents.push(combo)}
+          else if(sel.anyoType==='Synchronized'){p.events.anyoTeam=true;if(!p.events.anyoSynchronizedEvents.includes(combo))p.events.anyoSynchronizedEvents.push(combo)}
           if(sel.style==='Traditional'){p.events.anyoTraditional=true;p.events.anyoTraditionalWeapons=Array.from(new Set([...(p.events.anyoTraditionalWeapons||[]),sel.weapon]))}
           if(sel.style==='Non-Traditional'){p.events.anyoNonTraditional=true;p.events.anyoNonTraditionalWeapons=Array.from(new Set([...(p.events.anyoNonTraditionalWeapons||[]),sel.weapon]))}
         }
       }
-      // CAPRISAA's Elementary/Secondary sections are the authoritative school
-      // division for Anyo. Store that selection on the player so a later cloud
-      // sync cannot recreate the same athlete in the other overlapping division.
-      const importedAnyo=Array.isArray(r.anyoSelections)?r.anyoSelections:[];
-      p.events.anyoIndividualRegistrations=importedAnyo.filter(x=>x.anyoType==='Individual').map(x=>({schoolLevel:x.schoolLevel||'',style:x.style||'',weapon:x.weapon||'Any'}));
-      p.events.anyoSynchronizedRegistrations=importedAnyo.filter(x=>['Synchronized','Mixed'].includes(x.anyoType)).map(x=>({schoolLevel:x.schoolLevel||'',anyoType:x.anyoType,style:x.style||'',weapon:x.weapon||'Any',groupReference:x.groupReference||''}));
       p.registrationSource='File Import';p.registrationContact=r.contact||p.registrationContact||'';p.email=r.email||p.email||'';p.parentGuardianName=r.parent||p.parentGuardianName||'';p.parentGuardianContact=r.parentContact||p.parentGuardianContact||'';
       p.anyoGroupReference=r.groupReference||p.anyoGroupReference||'';p.anyoGroupMode=r.groupMode||p.anyoGroupMode||'';
       // Keep the coach's explicit Combative category selection even when declared
       // weight is outside that class. Verified weigh-in controls eligibility later.
       s.registrations=Array.isArray(s.registrations)?s.registrations:[];
-      const importedAnyoIndividualKeys=new Set();
+      // Anyo Individual selections are category registrations too. Older importer
+      // versions only set player.events flags and never created a player-linked
+      // registration/entry, which made Draw Lots unable to identify the athlete.
+      // Create both records here from the exact submitted style/weapon and the
+      // player's age/sex. Synchronized entries remain handled by the group builder below.
       for(const sel of (r.selections||[])){
         if(sel.event!=='Arnis Anyo'||sel.anyoType!=='Individual')continue;
-        const matches=(s.categories||[]).filter(c=>categoryEligibleForPlayer(c,r,sel));
-        let chosen=matches;
-        if(matches.length>1&&sel.schoolLevel){
-          const level=String(sel.schoolLevel).toLowerCase();
-          chosen=matches.filter(c=>{
-            const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
-            const cl=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'secondary':'';
-            return cl===level;
-          });
+        const age=Number(p.age);
+        const wantedStyle=String(sel.style||'Traditional');
+        const wantedWeapon=String(sel.weapon||'Any');
+        const candidates=(s.categories||[]).filter(c=>{
+          if(String(c.event)!=='Arnis Anyo')return false;
+          if(String(c.anyoType||'')!=='Individual')return false;
+          if(String(c.anyoStyle||'Traditional')!==wantedStyle)return false;
+          if(String(c.anyoWeapon||'Any')!=='Any'&&String(c.anyoWeapon||'Any')!==wantedWeapon)return false;
+          if(c.sex&&c.sex!=='Mixed'&&String(c.sex)!==String(p.sex))return false;
+          const preset=String(c.preset||'').toUpperCase();
+          let min=Number(c.ageFrom??c.age_min??0),max=Number(c.ageTo??c.age_max??99);
+          if(preset.includes('ANYO-ELEMENTARY')||String(c.name||'').toLowerCase().includes('elementary')){min=1;max=12;}
+          else if(preset.includes('ANYO-SECONDARY')||String(c.name||'').toLowerCase().includes('secondary')){min=13;max=17;}
+          return Number.isFinite(age)&&age>=min&&age<=max;
+        });
+        for(const c of candidates){
+          const key=String(p.id)+'|'+String(c.id);
+          const active=s.registrations.find(x=>String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'')===key&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(x.status||'ACTIVE').toUpperCase()));
+          let entry=(s.anyoEntries||[]).find(e=>String(e.categoryId)===String(c.id)&&e.type==='Individual'&&e.memberIds?.some(id=>String(id)===String(p.id))&&e.status!=='deleted');
+          if(!entry){
+            const count=(s.anyoEntries||[]).filter(e=>String(e.categoryId)===String(c.id)&&e.type==='Individual').length+1;
+            entry={id:uid(),number:p.number||('IND-'+String(count).padStart(3,'0')),type:'Individual',categoryId:c.id,style:c.anyoStyle,weapon:c.anyoWeapon,groupReference:'',memberIds:[p.id],status:'active'};
+            s.anyoEntries=Array.isArray(s.anyoEntries)?s.anyoEntries:[];
+            s.anyoEntries.push(entry);
+          }
+          if(!active)s.registrations.push({id:null,teamId:p.teamId||'',playerId:p.id,categoryId:c.id,anyoEntryId:entry.id,status:'ACTIVE',feeAmount:Number(c.registrationFee)||0,registeredAt:new Date().toISOString()});
+          else if(!active.anyoEntryId)active.anyoEntryId=entry.id;
         }
-        if(chosen.length===1)importedAnyoIndividualKeys.add(String(p.id)+'|'+String(chosen[0].id));
       }
-      // The uploaded registration workbook is authoritative for these players.
-      // Remove stale Anyo individual registrations from an earlier import before
-      // adding the exact selected category. This is what prevents Hanz-like
-      // athletes from remaining in both Elementary and Secondary.
-      s.registrations=s.registrations.filter(x=>{
-        const key=String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'');
-        const c=(s.categories||[]).find(cat=>String(cat.id)===String(x.categoryId||x.category_id||''));
-        if(String(x.playerId||x.player_id||'')!==String(p.id))return true;
-        if(c?.event==='Arnis Anyo'&&(c.anyoType||'Individual')==='Individual')return importedAnyoIndividualKeys.has(key);
-        return true;
-      });
-      // Preserve the exact Anyo category selected by the registration file.
-      // Elementary and Secondary Anyo age ranges overlap, so player age alone
-      // must never create registrations in both school divisions.
-      const addRegistration=(c,anyoEntryId=null)=>{
-        if(!c)return;
-        const key=String(p.id)+'|'+String(c.id);
-        if(!s.registrations.some(x=>String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'')===key&& !['CANCELLED','DELETED','WITHDRAWN'].includes(String(x.status||'ACTIVE').toUpperCase())))
-          s.registrations.push({id:null,teamId:p.teamId||'',playerId:p.id,categoryId:c.id,anyoEntryId, status:'ACTIVE',feeAmount:Number(c.registrationFee)||0,registeredAt:new Date().toISOString()});
-      };
       for(const choice of (r.categorySelections||[])){
         const c=(s.categories||[]).find(x=>String(x.id)===String(choice.id));
         if(!c||choice.event==='Arnis Anyo'||choice.event==='Livestick')continue;
-        addRegistration(c);
-      }
-      for(const sel of (r.selections||[])){
-        if(sel.event!=='Arnis Anyo'||sel.anyoType!=='Individual')continue;
-        const matches=(s.categories||[]).filter(c=>categoryEligibleForPlayer(c,r,sel));
-        if(matches.length===1){
-          addRegistration(matches[0]);
-        }else if(matches.length>1 && sel.schoolLevel){
-          const level=String(sel.schoolLevel).toLowerCase();
-          const levelMatches=matches.filter(c=>{
-            const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
-            const cl=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'secondary':'';
-            return cl===level;
-          });
-          if(levelMatches.length===1)addRegistration(levelMatches[0]);
-        }
+        const key=String(p.id)+'|'+String(c.id);
+        if(!s.registrations.some(x=>String(x.playerId||x.player_id||'')+'|'+String(x.categoryId||x.category_id||'')===key&& !['CANCELLED','DELETED','WITHDRAWN'].includes(String(x.status||'ACTIVE').toUpperCase())))
+          s.registrations.push({id:null,teamId:p.teamId||'',playerId:p.id,categoryId:c.id,anyoEntryId:null,status:'ACTIVE',feeAmount:Number(c.registrationFee)||0,registeredAt:new Date().toISOString()});
       }
       registrations+=r.categories.length;
     }
@@ -664,10 +616,15 @@
           if(String(c.anyoStyle||'Traditional')!==String(sel.style||'Traditional'))return false;
           if(String(c.anyoWeapon||'Any')!=='Any'&&String(c.anyoWeapon)!==String(sel.weapon||'Any'))return false;
           if(c.sex!=='Mixed'&&c.sex!==p.sex)return false;
-          const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
-          const categoryLevel=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'Elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'Secondary':'';
-          if(sel.schoolLevel&&categoryLevel&&String(sel.schoolLevel)!==categoryLevel)return false;
-          return true;
+          // Critical division guard: synchronized groups must be built only from categories
+          // whose age range accepts every member. This prevents Secondary athletes from
+          // being attached to an Elementary Anyo entry simply because the same style/weapon exists.
+          const preset=String(c.preset||'').toUpperCase();
+          let min=Number(c.ageFrom??c.age_min??0),max=Number(c.ageTo??c.age_max??99);
+          if(preset.includes('ANYO-ELEMENTARY')){min=1;max=12;}
+          else if(preset.includes('ANYO-SECONDARY')){min=13;max=17;}
+          const a=Number(p.age);
+          return Number.isFinite(a)&&a>=min&&a<=max;
         });
         for(const c of matches){
           const key=[p.teamId||'',String(r.groupReference).trim().toLowerCase(),c.id].join('|');
@@ -680,6 +637,13 @@
     for(const g of groups.values()){
       const c=g.category;
       const valid=c.anyoType==='Mixed' ? g.players.length===2 && new Set(g.players.map(x=>x.sex)).size===2 : g.players.length>=2&&g.players.length<=3;
+      if(valid){
+        const preset=String(c.preset||'').toUpperCase();
+        let min=Number(c.ageFrom??c.age_min??0),max=Number(c.ageTo??c.age_max??99);
+        if(preset.includes('ANYO-ELEMENTARY')){min=1;max=12;}
+        else if(preset.includes('ANYO-SECONDARY')){min=13;max=17;}
+        if(g.players.some(x=>{const a=Number(x.age);return !Number.isFinite(a)||a<min||a>max}))continue;
+      }
       if(!valid)continue;
       const same=(state().anyoEntries||[]).find(e=>e.categoryId===c.id&&String(e.groupReference||'').trim().toLowerCase()===g.reference.toLowerCase()&&e.type===c.anyoType&&e.status!=='deleted');
       if(same){same.memberIds=[...new Set([...(same.memberIds||[]),...g.players.map(x=>x.id)])].slice(0,3);continue;}

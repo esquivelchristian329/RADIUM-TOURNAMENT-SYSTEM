@@ -29,72 +29,168 @@
   window.ensureIndividualAnyoEntries=function(){
     try{
       const state=window.__RADIUM_GET_DATA?.();
-      if(!state||!Array.isArray(state.categories)||!Array.isArray(state.players))return;
-      if(!Array.isArray(state.registrations))state.registrations=[];
-      if(!Array.isArray(state.anyoEntries))state.anyoEntries=[];
 
-      const active=r=>!['CANCELLED','DELETED','WITHDRAWN','NO_SHOW'].includes(String(r?.status||'ACTIVE').toUpperCase());
-      const categoryMap=new Map(state.categories.map(c=>[String(c.id),c]));
-      const playerMap=new Map(state.players.map(p=>[String(p.id),p]));
+      if(!state) return;
 
-      // If an import recorded the workbook's school division, use it to remove
-      // stale registrations created by older age-based Anyo logic. This does not
-      // guess a division from age; it uses the explicit import metadata.
-      const intended=new Set();
-      for(const p of state.players){
-        const ev=p?.events||{};
-        for(const x of (ev.anyoIndividualRegistrations||[])){
-          const level=String(x?.schoolLevel||'').trim();
-          const style=String(x?.style||'').trim();
-          const weapon=String(x?.weapon||'Any').trim();
-          if(!level)continue;
-          for(const c of state.categories){
-            if(c?.event!=='Arnis Anyo'||(c.anyoType||'Individual')!=='Individual')continue;
-            const preset=String(c.preset||'').toUpperCase(),name=String(c.name||'');
-            const cl=preset.includes('ANYO-ELEMENTARY')||/^\s*elementary\b/i.test(name)?'Elementary':preset.includes('ANYO-SECONDARY')||/^\s*secondary\b/i.test(name)?'Secondary':'';
-            if(cl!==level)continue;
-            if(style&&String(c.anyoStyle||'Traditional')!==style)continue;
-            if(weapon!=='Any'&&String(c.anyoWeapon||'Any')!==weapon)continue;
-            intended.add(String(p.id)+'|'+String(c.id));
+      if(!Array.isArray(state.categories)) return;
+
+      if(!Array.isArray(state.players)) return;
+
+      const entries=Array.isArray(state.anyoEntries)
+        ? state.anyoEntries.slice()
+        : [];
+
+      let changed=false;
+
+      function eligibleIndividualAnyo(player,category){
+
+        if(!player||!category) return false;
+
+        if(category.event!=='Arnis Anyo') return false;
+
+        if((category.anyoType||'Individual')!=='Individual') return false;
+
+        const playerAge=Number(player.age);
+
+        if(
+          !Number.isFinite(playerAge) ||
+          playerAge<Number(category.ageFrom) ||
+          playerAge>Number(category.ageTo)
+        ){
+          return false;
+        }
+
+        if(
+          category.sex &&
+          category.sex!=='Mixed' &&
+          category.sex!==player.sex
+        ){
+          return false;
+        }
+
+        const events=player.events||{};
+
+        if(events.anyoIndividual!==true){
+          return false;
+        }
+
+        const style=category.anyoStyle||'Traditional';
+
+        const weapon=category.anyoWeapon||'Any';
+
+        const combos=Array.isArray(events.anyoIndividualEvents)
+          ? events.anyoIndividualEvents
+          : [];
+
+        if(weapon!=='Any'){
+
+          const wanted=style+'|'+weapon;
+
+          if(combos.length){
+            if(!combos.includes(wanted)){
+              return false;
+            }
+          }else{
+
+            const legacyWeapons=
+              style==='Traditional'
+                ? events.anyoTraditionalWeapons
+                : events.anyoNonTraditionalWeapons;
+
+            if(
+              !Array.isArray(legacyWeapons) ||
+              !legacyWeapons.includes(weapon)
+            ){
+              return false;
+            }
           }
+        }
+
+        return true;
+      }
+
+      for(const category of state.categories){
+
+        if(
+          category?.event!=='Arnis Anyo' ||
+          (category.anyoType||'Individual')!=='Individual'
+        ){
+          continue;
+        }
+
+        for(const player of state.players){
+
+          if(!eligibleIndividualAnyo(player,category)){
+            continue;
+          }
+
+          /*
+           * One real Individual Anyo registration must have exactly
+           * one Individual Anyo entry for this category/player pair.
+           */
+          const existing=entries.find(entry=>
+            entry &&
+            entry.status!=='deleted' &&
+            entry.type==='Individual' &&
+            String(entry.categoryId)===String(category.id) &&
+            Array.isArray(entry.memberIds) &&
+            String(entry.memberIds[0])===String(player.id)
+          );
+
+          if(existing){
+            continue;
+          }
+
+          const categoryCount=entries.filter(entry=>
+            entry &&
+            String(entry.categoryId)===String(category.id) &&
+            entry.status!=='deleted'
+          ).length;
+
+          entries.push({
+            id:`tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`,
+            number:
+              player.number ||
+              (
+                'IND-' +
+                String(categoryCount+1).padStart(3,'0')
+              ),
+            type:'Individual',
+            categoryId:category.id,
+            style:category.anyoStyle||'Traditional',
+            weapon:category.anyoWeapon||'Any',
+            groupReference:'',
+            status:'active',
+            memberIds:[player.id]
+          });
+
+          changed=true;
         }
       }
 
-      if(intended.size){
-        state.registrations=state.registrations.filter(r=>{
-          const c=categoryMap.get(String(r?.categoryId??r?.category_id??''));
-          if(!c||c.event!=='Arnis Anyo'||(c.anyoType||'Individual')!=='Individual')return true;
-          const pid=String(r?.playerId??r?.player_id??'');
-          return !active(r)||intended.has(pid+'|'+String(c.id));
-        });
+      if(changed){
+
+        state.anyoEntries=entries;
+
+        /*
+         * fromCloud=true is important.
+         * This normalization must NOT immediately create a local
+         * save loop. Supabase synchronization will materialize the
+         * temporary IDs into real Supabase UUIDs.
+         */
+        window.__RADIUM_SET_DATA?.(
+          state,
+          {fromCloud:true}
+        );
       }
 
-      const explicit=new Set(state.registrations.filter(active).filter(r=>{
-        const c=categoryMap.get(String(r?.categoryId??r?.category_id??''));
-        return r?.playerId&&c?.event==='Arnis Anyo'&&(c.anyoType||'Individual')==='Individual';
-      }).map(r=>String(r.playerId??r.player_id)+'|'+String(r.categoryId??r.category_id)));
+    }catch(error){
 
-      // Drop stale local Individual entries which no longer have an explicit
-      // registration. Keep Synchronized/Mixed entries untouched here.
-      state.anyoEntries=state.anyoEntries.filter(e=>{
-        if(e?.type!=='Individual')return true;
-        const pid=Array.isArray(e.memberIds)?e.memberIds[0]:null;
-        return pid&&explicit.has(String(pid)+'|'+String(e.categoryId));
-      });
-
-      const entries=state.anyoEntries.slice();
-      for(const key of explicit){
-        const [pid,cid]=key.split('|');
-        if(!playerMap.has(pid)||!categoryMap.has(cid))continue;
-        const c=categoryMap.get(cid);
-        if(c?.event!=='Arnis Anyo'||(c.anyoType||'Individual')!=='Individual')continue;
-        if(entries.some(e=>e?.type==='Individual'&&String(e.categoryId)===cid&&String(e.memberIds?.[0])===pid&&e.status!=='deleted'))continue;
-        const count=entries.filter(e=>e?.type==='Individual'&&String(e.categoryId)===cid&&e.status!=='deleted').length;
-        entries.push({id:`tmp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`,number:playerMap.get(pid)?.number||('IND-'+String(count+1).padStart(3,'0')),type:'Individual',categoryId:c.id,style:c.anyoStyle||'Traditional',weapon:c.anyoWeapon||'Any',groupReference:'',status:'active',memberIds:[pid]});
-      }
-      state.anyoEntries=entries;
-      window.__RADIUM_SET_DATA?.(state,{fromCloud:true});
-    }catch(error){console.warn('RADIUM Individual Anyo entry normalization skipped:',error)}
+      console.warn(
+        'RADIUM Individual Anyo entry normalization skipped:',
+        error
+      );
+    }
   };
 
 
@@ -198,9 +294,26 @@
       const teamIds=new Set(teams.map(t=>t.id));
       const players0=(state.players||[]).map(p=>{const n=splitName(p.name);return{id:p.id,tournament_id:tid,team_id:teamIds.has(p.teamId)?p.teamId:null,first_name:n.first,middle_name:n.middle,last_name:n.last,nickname:p.nick||p.nickname||null,gender:p.sex||p.gender||null,birthdate:p.birth||p.birthdate||null,age:Number.isFinite(Number(p.age))?Number(p.age):null,weight:Number.isFinite(Number(p.weight))?Number(p.weight):null,school:p.school||null,player_number:p.number||null,seed:Number.isFinite(Number(p.seed))?Number(p.seed):null,coach:p.coach||null,photo_url:p.photo||p.photo_url||null,events:p.events||{},status:p.status||'active'};});
       const players=await materialize('players',players0,'Players sync'); const playerIds=new Set(players.map(p=>p.id));
-      // Normalize each player's Anyo registrations into Supabase. The player.events JSON remains a compatibility/cache field, but this table is the authoritative event registration list.
-      await fail('Anyo player event cleanup',await db.remove('player_anyo_events',{tournament_id:tid}));
-      const anyoEventRows=[];for(const p of state.players||[]){if(!playerIds.has(p.id))continue;const e=p.events||{};const byDivision={Individual:Array.isArray(e.anyoIndividualEvents)?e.anyoIndividualEvents:[],Synchronized:Array.isArray(e.anyoSynchronizedEvents)?e.anyoSynchronizedEvents:[]};if(!byDivision.Individual.length&&!byDivision.Synchronized.length){const legacy=[];if(e.anyoTraditional)for(const w of (e.anyoTraditionalWeapons||[e.anyoWeapons||'Single Weapon']))legacy.push(`Traditional|${w}`);if(e.anyoNonTraditional)for(const w of (e.anyoNonTraditionalWeapons||[e.anyoWeapons||'Single Weapon']))legacy.push(`Non-Traditional|${w}`);if(e.anyoIndividual)byDivision.Individual=legacy;if(e.anyoTeam)byDivision.Synchronized=legacy;}for(const division of ['Individual','Synchronized'])for(const combo of byDivision[division]){const [style,weapon]=String(combo).split('|');if(style&&weapon)anyoEventRows.push({tournament_id:tid,player_id:p.id,division,style,weapon});}}
+      // Normalize only players that actually carry explicit Anyo selections.
+      // Never wipe the whole cache when a cloud pull temporarily lacks Anyo flags;
+      // that was the data-loss path that made registered Anyo players disappear.
+      const anyoEventRows=[];
+      const managedAnyoPlayers=new Set();
+      for(const p of state.players||[]){
+        if(!playerIds.has(p.id))continue;
+        const e=p.events||{};
+        const byDivision={Individual:Array.isArray(e.anyoIndividualEvents)?e.anyoIndividualEvents:[],Synchronized:Array.isArray(e.anyoSynchronizedEvents)?e.anyoSynchronizedEvents:[]};
+        if(!byDivision.Individual.length&&!byDivision.Synchronized.length){
+          const legacy=[];
+          if(e.anyoTraditional)for(const w of (e.anyoTraditionalWeapons||[e.anyoWeapons||'Single Weapon']))legacy.push(`Traditional|${w}`);
+          if(e.anyoNonTraditional)for(const w of (e.anyoNonTraditionalWeapons||[e.anyoWeapons||'Single Weapon']))legacy.push(`Non-Traditional|${w}`);
+          if(e.anyoIndividual)byDivision.Individual=legacy;
+          if(e.anyoTeam)byDivision.Synchronized=legacy;
+        }
+        if(byDivision.Individual.length||byDivision.Synchronized.length||e.anyoIndividual===true||e.anyoTeam===true)managedAnyoPlayers.add(String(p.id));
+        for(const division of ['Individual','Synchronized'])for(const combo of byDivision[division]){const [style,weapon]=String(combo).split('|');if(style&&weapon)anyoEventRows.push({tournament_id:tid,player_id:p.id,division,style,weapon});}
+      }
+      for(const pid of managedAnyoPlayers)await fail('Anyo player event cleanup',await db.remove('player_anyo_events',{tournament_id:tid,player_id:pid}));
       if(anyoEventRows.length)await fail('Anyo player events sync',await db.insert('player_anyo_events',anyoEventRows));
       const depedPekaf=String(state.setup?.competitionProgram||'').toUpperCase()==='DEPED_PEKAF';
       const cats0=(state.categories||[]).map(c=>({id:c.id,tournament_id:tid,name:String(c.name||'Category'),event_type:c.event==='Arnis Anyo'?'Anyo':(c.event==='Livestick'?'Livestick':'Combative'),gender:c.sex||null,event_number:c.eventNumber||c.number||null,judges:Math.min(5,Math.max(3,Number(c.judges)||5)),preset:c.preset||null,weight_required:c.event!=='Arnis Anyo'&&depedPekaf?true:!!(c.weightRequired||c.requireWeight||c.weightFrom>0||c.weightTo<999),bracket_by:c.event!=='Arnis Anyo'&&depedPekaf?'weight':(c.bracketBy||null),bracket:c.bracket||{},age_min:Number.isFinite(Number(c.ageFrom))?Number(c.ageFrom):null,age_max:Number.isFinite(Number(c.ageTo))?Number(c.ageTo):null,weight_min:Number.isFinite(Number(c.weightFrom))?Number(c.weightFrom):null,weight_max:Number.isFinite(Number(c.weightTo))?Number(c.weightTo):null,division:c.anyoType||null,style:c.anyoStyle||null,weapon:c.anyoWeapon||null,scoring_type:c.event==='Arnis Anyo'?'judge_average':'combat',rules:{draw:c.draw||'random',weightRequired:c.event!=='Arnis Anyo'&&depedPekaf?true:!!c.weightRequired},status:'active'}));
@@ -279,21 +392,38 @@
       const existingAnyo=new Map((existingAnyoRes.data||[]).map(x=>[String(x.id),x]));
       const existingAnyoByKey=new Map((existingAnyoRes.data||[]).map(x=>[String(x.category_id)+'|'+String(x.entry_type)+'|'+String(x.entry_number||''),x]));
       const entryRows0=[];const memberRows0=[];const stateEntries=Array.isArray(state.anyoEntries)?state.anyoEntries:[];
+      const explicitAnyoRegistrationKeys=new Set((state.registrations||[]).filter(r=>r&&r.playerId&&r.categoryId&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'ACTIVE').toUpperCase())).map(r=>String(r.playerId)+'|'+String(r.categoryId)));
       for(const c of state.categories||[]){if(c.event!=='Arnis Anyo')continue;const type=c.anyoType||'Individual';
         if(type==='Individual'){
           for(const pl of state.players||[]){
-            const key=String(pl.id)+'|'+String(c.id);
-            if(!playerIds.has(pl.id)||!explicitAnyoIndividualKeys.has(key))continue;
-            let existing=stateEntries.find(e=>e.categoryId===c.id&&e.type==='Individual'&&Array.isArray(e.memberIds)&&e.memberIds[0]===pl.id&&e.status!=='deleted');
-            if(!existing){
-              existing={id:uid(),number:pl.number||('IND-'+String(stateEntries.filter(e=>e.categoryId===c.id).length+1).padStart(3,'0')),type:'Individual',categoryId:c.id,style:c.anyoStyle||'Traditional',weapon:c.anyoWeapon,groupReference:'',status:'active',memberIds:[pl.id]};
-              stateEntries.push(existing);if(Array.isArray(state.anyoEntries))state.anyoEntries.push(existing);
-            }
-            entryRows0.push({id:existing.id,tournament_id:tid,category_id:c.id,entry_type:'Individual',entry_number:existing.number||pl.number||null,style:c.anyoStyle||'Traditional',weapon:c.anyoWeapon,group_reference:existing.groupReference||null,status:existing.status||'active',draw_order:Number.isFinite(Number(existing.drawOrder))?Number(existing.drawOrder):(Number.isFinite(Number((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||'')))?.draw_order))?Number((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||''))).draw_order):null),draw_type:existing.drawType||((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||'')))?.draw_type)||null,drawn_at:existing.drawnAt||((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||'')))?.drawn_at)||null});
-            memberRows0.push({entry_id:existing.id,tournament_id:tid,player_id:pl.id,member_position:1});
-          }
+            if(!playerIds.has(pl.id))continue;
+            const explicitlyRegistered=explicitAnyoRegistrationKeys.has(String(pl.id)+'|'+String(c.id));
+            const age=Number(pl.age);
+            const label=(String(c.preset||'')+' '+String(c.name||'')).toLowerCase();
+            const min=label.includes('elementary')?1:(label.includes('secondary')?13:Number(c.ageFrom||0));
+            const max=label.includes('elementary')?12:(label.includes('secondary')?17:Number(c.ageTo||99));
+            if(!Number.isFinite(age)||age<min||age>max)continue;
+            if(c.sex&&c.sex!=='Mixed'&&c.sex!==pl.sex)continue;
+            if(!explicitlyRegistered&&!eligibleForCategory(pl,c))continue;
+            let existing=stateEntries.find(e=>e.categoryId===c.id&&e.type==='Individual'&&Array.isArray(e.memberIds)&&e.memberIds.some(x=>String(x)===String(pl.id))&&e.status!=='deleted');if(!existing){existing={id:uid(),number:pl.number||('IND-'+String(stateEntries.filter(e=>e.categoryId===c.id).length+1).padStart(3,'0')),type:'Individual',categoryId:c.id,style:c.anyoStyle||'Traditional',weapon:c.anyoWeapon,groupReference:'',status:'active'};stateEntries.push(existing);if(Array.isArray(state.anyoEntries))state.anyoEntries.push(existing);}entryRows0.push({id:existing.id,tournament_id:tid,category_id:c.id,entry_type:'Individual',entry_number:existing.number||pl.number||null,style:c.anyoStyle||'Traditional',weapon:c.anyoWeapon,group_reference:existing.groupReference||null,status:existing.status||'active',draw_order:Number.isFinite(Number(existing.drawOrder))?Number(existing.drawOrder):(Number.isFinite(Number((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||'')))?.draw_order))?Number((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||''))).draw_order):null),draw_type:existing.drawType||((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||'')))?.draw_type)||null,drawn_at:existing.drawnAt||((existingAnyo.get(String(existing.id))||existingAnyoByKey.get(String(c.id)+'|Individual|'+String(existing.number||pl.number||'')))?.drawn_at)||null});memberRows0.push({entry_id:existing.id,tournament_id:tid,player_id:pl.id,member_position:1});}
         }else{
-          for(const e of stateEntries.filter(e=>e.categoryId===c.id&&e.type===type&&e.status!=='deleted')){const mids=(e.memberIds||[]).filter(x=>playerIds.has(x));if((type==='Mixed'&&mids.length!==2)||(type==='Synchronized'&&(mids.length<2||mids.length>3)))continue;entryRows0.push({id:e.id,tournament_id:tid,category_id:c.id,entry_type:type,entry_number:e.number||null,style:e.style||c.anyoStyle||'Traditional',weapon:e.weapon||c.anyoWeapon,group_reference:e.groupReference||null,status:e.status||'active',draw_order:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):(Number.isFinite(Number((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.draw_order))?Number((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||''))).draw_order):null),draw_type:e.drawType||((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.draw_type)||null,drawn_at:e.drawnAt||((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.drawn_at)||null});mids.forEach((pid,i)=>memberRows0.push({entry_id:e.id,tournament_id:tid,player_id:pid,member_position:i+1}));}
+          for(const e of stateEntries.filter(e=>e.categoryId===c.id&&e.type===type&&e.status!=='deleted')){const mids=(e.memberIds||[]).filter(x=>playerIds.has(x));if((type==='Mixed'&&mids.length!==2)||(type==='Synchronized'&&(mids.length<2||mids.length>3)))continue;const members=mids.map(pid=>state.players.find(p=>String(p.id)===String(pid))).filter(Boolean);const preset=String(c.preset||'').toUpperCase();let min=Number(c.ageFrom??c.age_min??0),max=Number(c.ageTo??c.age_max??99);if(preset.includes('ANYO-ELEMENTARY')){min=1;max=12;}else if(preset.includes('ANYO-SECONDARY')){min=13;max=17;}if(members.some(p=>{const a=Number(p.age);return !Number.isFinite(a)||a<min||a>max})|| (type==='Synchronized'&&c.sex&&c.sex!=='Mixed'&&members.some(p=>(p.sex||p.gender)!==c.sex)) || (type==='Mixed'&&new Set(members.map(p=>p.sex||p.gender)).size!==2)){
+          // Repair legacy Anyo entries that were stored under the wrong Elementary/Secondary category.
+          // Only remap when there is exactly one compatible category with the same type/style/weapon.
+          const targets=(state.categories||[]).filter(t=>{
+            if(String(t.event)!=='Arnis Anyo'||String(t.id)===String(c.id))return false;
+            if(String(t.anyoType||'')!==String(type))return false;
+            if(String(t.anyoStyle||'Traditional')!==String(e.style||c.anyoStyle||'Traditional'))return false;
+            if(String(t.anyoWeapon||'Any')!=='Any'&&String(t.anyoWeapon)!==String(e.weapon||c.anyoWeapon||'Any'))return false;
+            if(type==='Synchronized'&&t.sex&&t.sex!=='Mixed'&&members.some(p=>(p.sex||p.gender)!==t.sex))return false;
+            if(type==='Mixed'&&new Set(members.map(p=>p.sex||p.gender)).size!==2)return false;
+            const tp=String(t.preset||'').toUpperCase();let tmin=Number(t.ageFrom??t.age_min??0),tmax=Number(t.ageTo??t.age_max??99);
+            if(tp.includes('ANYO-ELEMENTARY')){tmin=1;tmax=12;}else if(tp.includes('ANYO-SECONDARY')){tmin=13;tmax=17;}
+            return members.every(p=>{const a=Number(p.age);return Number.isFinite(a)&&a>=tmin&&a<=tmax;});
+          });
+          if(targets.length===1){e.categoryId=targets[0].id;continue;}
+          continue;
+        }entryRows0.push({id:e.id,tournament_id:tid,category_id:c.id,entry_type:type,entry_number:e.number||null,style:e.style||c.anyoStyle||'Traditional',weapon:e.weapon||c.anyoWeapon,group_reference:e.groupReference||null,status:e.status||'active',draw_order:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):(Number.isFinite(Number((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.draw_order))?Number((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||''))).draw_order):null),draw_type:e.drawType||((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.draw_type)||null,drawn_at:e.drawnAt||((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.drawn_at)||null});mids.forEach((pid,i)=>memberRows0.push({entry_id:e.id,tournament_id:tid,player_id:pid,member_position:i+1}));}
         }
       }
       const anyoEntries=await materialize('anyo_entries',entryRows0,'Anyo entries sync');
@@ -316,24 +446,6 @@
       const existingRegs=await fail('Registration status read',await db.select('category_registrations',{select:'id,player_id,category_id,anyo_entry_id,status,fee_amount,team_id',eq:{tournament_id:tid}}));
       const regByPlayer=new Map((existingRegs.data||[]).filter(r=>r.player_id).map(r=>[String(r.player_id)+'|'+String(r.category_id),r]));
       const regByEntry=new Map((existingRegs.data||[]).filter(r=>r.anyo_entry_id).map(r=>[String(r.anyo_entry_id),r]));
-      // Individual Anyo entries must follow explicit category registrations.
-      // Do not infer Elementary vs Secondary from age or broad player event flags.
-      // This prevents one athlete from being auto-created in both overlapping
-      // school-level Anyo categories.
-      const explicitAnyoIndividualKeys=new Set();
-      const activeReg=r=>!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r?.status||'ACTIVE').toUpperCase());
-      for(const r of existingRegs.data||[]){
-        if(!r?.player_id||!activeReg(r))continue;
-        const c=(state.categories||[]).find(x=>String(x.id)===String(r.category_id));
-        if(c?.event==='Arnis Anyo'&&(c.anyoType||'Individual')==='Individual')
-          explicitAnyoIndividualKeys.add(String(r.player_id)+'|'+String(r.category_id));
-      }
-      for(const r of state.registrations||[]){
-        if(!r?.playerId||!activeReg(r))continue;
-        const c=(state.categories||[]).find(x=>String(x.id)===String(r.categoryId));
-        if(c?.event==='Arnis Anyo'&&(c.anyoType||'Individual')==='Individual')
-          explicitAnyoIndividualKeys.add(String(r.playerId)+'|'+String(r.categoryId));
-      }
       const regRows=[]; const free=String(state.setup?.billingMode||'PAID').toUpperCase()==='FREE';
       const explicitRegistrationKeys=new Set((state.registrations||[]).filter(r=>r&&r.playerId&&r.categoryId&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'ACTIVE').toUpperCase())).map(r=>String(r.playerId)+'|'+String(r.categoryId)));
       for(const c of state.categories||[]) for(const pl of state.players||[]){
@@ -360,21 +472,9 @@
       }
       const anyoEntryIds=new Set(anyoEntries.map(e=>String(e.id)));const anyoMemberKeys=new Set();for(const e of anyoEntries){const members=(state.anyoEntries||[]).find(x=>String(x.id)===String(e.id))?.memberIds||[];for(const pid of members)anyoMemberKeys.add(String(pid)+'|'+String(e.category_id));}
       for(const old of existingRegs.data||[]){if(old.player_id&&anyoMemberKeys.has(String(old.player_id)+'|'+String(old.category_id))){await fail('Duplicate Anyo registration cleanup',await db.remove('category_registrations',{id:old.id}));}}
-      const categoryMapForCleanup=(st,id)=>{const c=(st.categories||[]).find(x=>String(x.id)===String(id));return c?.event==='Arnis Anyo'&&(c.anyoType||'Individual')==='Individual'};
       for(const r of regRows){
         if(r.id) await fail('Registration update',await db.update('category_registrations',r,{id:r.id}));
         else { delete r.id; const made=await fail('Registration insert',await db.insert('category_registrations',r)); if(made.data?.[0]?.id)r.id=made.data[0].id; }
-      }
-      // Remove stale Individual Anyo registration rows that are no longer in the
-      // authoritative imported state. This is intentionally limited to Individual
-      // Anyo rows; other event registrations are not touched by this cleanup.
-      const desiredIndividualKeys=new Set(regRows.filter(r=>r.player_id&&categoryMapForCleanup(state,r.category_id)).map(r=>String(r.player_id)+'|'+String(r.category_id)));
-      for(const old of existingRegs.data||[]){
-        if(!old?.player_id)continue;
-        const c=(state.categories||[]).find(x=>String(x.id)===String(old.category_id));
-        if(c?.event!=='Arnis Anyo'||(c.anyoType||'Individual')!=='Individual')continue;
-        if(activeReg(old)&&!desiredIndividualKeys.has(String(old.player_id)+'|'+String(old.category_id)))
-          await fail('Stale Individual Anyo registration cleanup',await db.remove('category_registrations',{id:old.id}));
       }
 
       const existingEntries=await fail('Anyo entries cleanup read',await db.select('anyo_entries',{select:'id',eq:{tournament_id:tid}}));for(const old of existingEntries.data||[])if(!entryIdSet.has(old.id))await fail('Stale Anyo entry cleanup',await db.remove('anyo_entries',{id:old.id}));
@@ -503,7 +603,22 @@
       const setup={...(row.settings?.setup||{}),name:row.name||row.settings?.setup?.name||'',date:row.event_date||row.settings?.setup?.date||new Date().toISOString().slice(0,10),venue:row.venue||row.settings?.setup?.venue||'',organizer:row.organizer||row.settings?.setup?.organizer||'',billingMode:(row.billing_mode||row.settings?.setup?.billingMode||'PAID')==='FREE'?'FREE':'PAID',currency:row.currency||'PHP',combativeRounds:Number(row.settings?.setup?.combativeRounds)===1?1:3,pin:'',pinHash:row.official_pin_hash||'',scoreboardLogos:['','','','']};
       const teamRows=teams.data||[],playerRows=players.data||[],catRows=cats.data||[],cpRows=cps.data||[];const categoryPlayers=new Map();cpRows.filter(x=>catRows.some(c=>c.id===x.category_id)&&playerRows.some(p=>p.id===x.player_id)).forEach(x=>{if(!categoryPlayers.has(x.category_id))categoryPlayers.set(x.category_id,new Map());categoryPlayers.get(x.category_id).set(x.player_id,{seed:x.seed,drawNumber:x.draw_number,drawType:x.draw_type,drawnAt:x.drawn_at});});
       const localPlayers=playerRows.map(p=>({id:p.id,number:p.player_number||p.id.slice(0,6).toUpperCase(),seed:p.seed||null,categorySeeds:{},name:[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' '),nick:p.nickname||'',sex:p.gender||'Male',birth:p.birthdate||'',age:Number(p.age)||0,weight:Number(p.weight)||0,school:p.school||'',teamId:p.team_id||'',coach:p.coach||'',photo:p.photo_url||'',events:p.events||{}}));
-      const anyoByPlayer=new Map();for(const r of (playerAnyoEvents.data||[])){if(!anyoByPlayer.has(r.player_id))anyoByPlayer.set(r.player_id,[]);anyoByPlayer.get(r.player_id).push(r)}
+      const anyoByPlayer=new Map();
+      for(const r of (playerAnyoEvents.data||[])){if(!anyoByPlayer.has(r.player_id))anyoByPlayer.set(r.player_id,[]);anyoByPlayer.get(r.player_id).push(r)}
+      // Registration rows are the fallback source for Anyo eligibility. Older
+      // tournaments can have valid category_registrations with player_id while
+      // player_anyo_events is empty because an earlier sync cleared that cache.
+      // Reconstruct the cache from the authoritative registration/category pair.
+      const categoryById=new Map(catRows.map(c=>[String(c.id),c]));
+      for(const r of (registrations.data||[])){
+        if(!r.player_id||['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase()))continue;
+        const c=categoryById.get(String(r.category_id));if(!c||String(c.event_type)!=='Anyo')continue;
+        const division=String(c.division||'Individual');
+        const style=String(c.style||'Traditional'),weapon=String(c.weapon||'Any');
+        if(!anyoByPlayer.has(r.player_id))anyoByPlayer.set(r.player_id,[]);
+        const arr=anyoByPlayer.get(r.player_id);
+        if(!arr.some(x=>x.division===division&&x.style===style&&x.weapon===weapon))arr.push({player_id:r.player_id,division,style,weapon});
+      }
       const localTeams=teamRows.map(t=>({id:t.id,name:t.name,code:t.abbreviation||'',logo:t.logo_url||'',coach:t.coach||'',manager:t.manager||''}));
       localPlayers.forEach(p=>{cpRows.filter(x=>x.player_id===p.id).forEach(x=>{p.categorySeeds[x.category_id]={seed:x.seed,drawNumber:x.draw_number,drawType:x.draw_type,drawnAt:x.drawn_at}});const rows=anyoByPlayer.get(p.id)||[];if(rows.length){const ind=rows.filter(r=>r.division==='Individual'),syncRows=rows.filter(r=>r.division==='Synchronized'),comboRows=a=>a.map(r=>`${r.style}|${r.weapon}`);p.events={...(p.events||{}),anyoIndividual:ind.length>0,anyoTeam:syncRows.length>0,anyoIndividualEvents:[...new Set(comboRows(ind))],anyoSynchronizedEvents:[...new Set(comboRows(syncRows))],anyoTraditional:rows.some(r=>r.style==='Traditional'),anyoNonTraditional:rows.some(r=>r.style==='Non-Traditional'),anyoTraditionalWeapons:[...new Set(rows.filter(r=>r.style==='Traditional').map(r=>r.weapon))],anyoNonTraditionalWeapons:[...new Set(rows.filter(r=>r.style==='Non-Traditional').map(r=>r.weapon))]};p.events.anyoWeapons=p.events.anyoTraditionalWeapons[0]||p.events.anyoNonTraditionalWeapons[0]||'Single Weapon';}});
       const matchRows=matches.data||[];const resultRows=results.data||[];const resultByMatch=new Map(resultRows.map(r=>[r.match_id,r]));const categoryLocal=catRows.map(c=>{const rounds=[];const ms=matchRows.filter(m=>m.category_id===c.id).sort((a,b)=>a.round-b.round||a.match_number-b.match_number);for(const m of ms){const ri=Math.max(0,Number(m.round)-1),mi=Math.max(0,Number(m.match_number)-1);if(!rounds[ri])rounds[ri]=[];const meta=m.metadata||{};const rr=resultByMatch.get(m.id);const courtNo=Number((courts.data||[]).find(x=>x.id===m.court_id)?.court_number)||null;rounds[ri][mi]={id:m.id,red:m.red_player_id||null,blue:m.blue_player_id||null,redScore:Number(m.red_score)||0,blueScore:Number(m.blue_score)||0,completed:['COMPLETED','BYE'].includes(String(m.status)),winner:m.winner_player_id||null,redBye:!!meta.redBye,blueBye:!!meta.blueBye,court:courtNo,matchFormat:m.match_format==='single'?'single':'best3',history:meta.history||[],nextMatchId:meta.nextMatchId||null,nextSlot:meta.nextSlot||null,firstRoundPosition:meta.firstRoundPosition??null};}

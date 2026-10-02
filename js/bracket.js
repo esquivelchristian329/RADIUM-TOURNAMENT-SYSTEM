@@ -138,15 +138,14 @@ async function loadAnyoPerformerDirectory(){
     }
     // Do not depend on cloud-sync state. The ANYO page reads the authoritative
     // tournament rows directly, which avoids the old empty-list state problem.
-    const [cr,er,mr,pr,tr,rr]=await Promise.all([
+    const [cr,er,mr,pr,tr]=await Promise.all([
       window.RADIUM_DB.select('categories',{select:'id,name,event_type,gender,event_number,judges,preset,division,style,weapon,age_min,age_max,status',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('anyo_entries',{select:'id,tournament_id,category_id,entry_type,entry_number,style,weapon,group_reference,status,draw_order,draw_type,drawn_at',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('anyo_entry_members',{select:'entry_id,tournament_id,player_id,member_position',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('category_registrations',{select:'id,category_id,anyo_entry_id,player_id,status',eq:{tournament_id:tid}})
+      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}})
     ]);
-    for(const q of [cr,er,mr,pr,tr,rr])if(q?.error)throw q.error;
+    for(const q of [cr,er,mr,pr,tr])if(q?.error)throw q.error;
 
     const categories=(cr.data||[]).filter(c=>String(c.event_type||'').trim().toLowerCase()==='anyo');
     const players=new Map((pr.data||[]).map(p=>[String(p.id),p]));
@@ -157,22 +156,12 @@ async function loadAnyoPerformerDirectory(){
       if(!membersByEntry.has(k))membersByEntry.set(k,[]);
       membersByEntry.get(k).push(m);
     });
-    const activeRegistrationRows=(rr.data||[]).filter(r=>!['CANCELLED','DELETED','WITHDRAWN','NO_SHOW'].includes(String(r.status||'ACTIVE').toUpperCase()));
-    const registeredEntryIds=new Set(activeRegistrationRows.filter(r=>r.anyo_entry_id).map(r=>String(r.anyo_entry_id)));
-    const registeredPlayerCategoryKeys=new Set(activeRegistrationRows.filter(r=>r.player_id).map(r=>String(r.player_id)+'|'+String(r.category_id)));
-    const entries=(er.data||[]).filter(e=>!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())).filter(e=>{
-      const type=String(e.entry_type||'Individual');
-      if(type==='Individual'){
-        const memberIds=(membersByEntry.get(String(e.id))||[]).map(m=>String(m.player_id));
-        return registeredEntryIds.has(String(e.id)) || memberIds.some(pid=>registeredPlayerCategoryKeys.has(pid+'|'+String(e.category_id)));
-      }
-      return registeredEntryIds.has(String(e.id));
-    }).map(e=>{
+    const entries=(er.data||[]).filter(e=>!['deleted','withdrawn'].includes(String(e.status||'').toLowerCase())).map(e=>{
       const members=(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0));
       const people=members.map(m=>players.get(String(m.player_id))).filter(Boolean);
       const names=people.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
       const teamNames=[...new Set(people.map(p=>teams.get(String(p.team_id))?.name).filter(Boolean))];
-      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',status:e.status||'active',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberIds:members.map(m=>String(m.player_id)).filter(Boolean),memberCount:people.length,rawMemberCount:members.length};
+      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberCount:people.length,rawMemberCount:members.length};
     });
     const entryIds=new Set(entries.map(e=>String(e.id)));
     const activeCategories=categories.filter(c=>entries.some(e=>String(e.categoryId)===String(c.id))||categories.length);
@@ -181,54 +170,7 @@ async function loadAnyoPerformerDirectory(){
 
     const weaponOrder={'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3};
     const divisionOrder={'Individual':1,'Synchronized':2,'Mixed':3};
-    // Anyo school level must come from the category's explicit preset/level,
-    // never from the overlapping age ranges (Elementary 1-13 / Secondary 1-18).
-    const divisionOf=c=>{
-      const preset=String(c?.preset||'').toUpperCase();
-      const level=String(c?.school_level||c?.level||'').toLowerCase();
-      if(preset.includes('ELEMENTARY')||level==='elementary')return 'Elementary';
-      if(preset.includes('SECONDARY')||level==='secondary')return 'Secondary';
-      return String(c?.name||'').toLowerCase().includes('secondary')?'Secondary':'Elementary';
-    };
-    const anyoEntryHasElementaryRegistration=(entry, allEntries, playerMap, elementaryCategories)=>{
-      const ids=(entry?.memberIds||[]).map(String).filter(Boolean);
-      if(!ids.length)return false;
-      const elementaryIds=new Set(elementaryCategories.map(c=>String(c.id)));
-      return allEntries.some(other=>{
-        if(String(other?.id)===String(entry?.id))return false;
-        if(!elementaryIds.has(String(other?.categoryId)))return false;
-        if(['deleted','withdrawn'].includes(String(other?.status||'').toLowerCase()))return false;
-        const otherIds=(other?.memberIds||[]).map(String).filter(Boolean);
-        if(!otherIds.length)return false;
-        // Individual: the same athlete is registered in Elementary.
-        if(String(entry?.type||'Individual').toLowerCase()==='individual'){
-          return ids.some(id=>otherIds.includes(id));
-        }
-        // Synchronized/Mixed: treat the group as the same registration when
-        // the member sets overlap substantially (or exactly), not merely one
-        // unrelated athlete from the same team.
-        const overlap=ids.filter(id=>otherIds.includes(id)).length;
-        const minSize=Math.min(ids.length,otherIds.length);
-        return minSize>0 && overlap===minSize;
-      });
-    };
-    const secondaryEntryConflictsWithElementary=(entry, category, allEntries, playerMap, elementaryCategories)=>{
-      if(divisionOf(category)!=='Secondary')return false;
-      const memberIds=(entry?.memberIds||[]).map(String).filter(Boolean);
-      if(!memberIds.length)return false;
-      const elementaryMax=Math.max(0,...elementaryCategories.map(c=>Number(c.age_max)).filter(Number.isFinite));
-      if(!elementaryMax)return false;
-      // Only suppress a Secondary duplicate when the same performer/group is
-      // also registered in Elementary AND the member is within the Elementary
-      // age range. This fixes duplicate cross-level registrations without
-      // using age alone to decide school level.
-      const hasElementaryRegistration=anyoEntryHasElementaryRegistration(entry,allEntries,playerMap,elementaryCategories);
-      if(!hasElementaryRegistration)return false;
-      return memberIds.some(id=>{
-        const p=playerMap.get(id);
-        return p&&Number.isFinite(Number(p.age))&&Number(p.age)<=elementaryMax;
-      });
-    };
+    const divisionOf=c=>{const label=String(c.name||'').toLowerCase();if(label.includes('secondary'))return 'Secondary';if(label.includes('elementary'))return 'Elementary';const min=Number(c.age_min),max=Number(c.age_max);if(Number.isFinite(min)&&Number.isFinite(max)){if(max<=12)return 'Elementary';if(min>=13)return 'Secondary';}return 'Elementary'};
     const sortedCategories=[...categories].sort((a,b)=>{
       const da=divisionOf(a),db=divisionOf(b); if(da!==db)return da==='Elementary'?-1:1;
       const wa=weaponOrder[a.weapon]||99,wb=weaponOrder[b.weapon]||99; if(wa!==wb)return wa-wb;
@@ -599,7 +541,7 @@ async function addDepEdPEKAFAnyoPreset(level){
   level=level==='Elementary'?'Elementary':'Secondary';
   const source=level==='Elementary'?DEPED_PEKAF_ANYO_ELEMENTARY:DEPED_PEKAF_ANYO_SECONDARY;
   const preset=level==='Elementary'?'DEPED-PEKAF-ANYO-ELEMENTARY':'DEPED-PEKAF-ANYO-SECONDARY';
-  const ageFrom=1,ageTo=level==='Elementary'?13:18;
+  const ageFrom=level==='Elementary'?1:13,ageTo=level==='Elementary'?12:17;
   const norm=v=>String(v??'').trim().toLowerCase().replace(/[–—]/g,'-').replace(/\s+/g,' ');
   const normSex=v=>{const x=norm(v);if(['male','boy','boys','m'].includes(x))return'Male';if(['female','girl','girls','f'].includes(x))return'Female';if(['mixed','mix'].includes(x))return'Mixed';return String(v||'').trim()};
   const normType=v=>{const x=norm(v);if(x.includes('mixed'))return'Mixed';if(x.includes('synchron'))return'Synchronized';if(x.includes('individual'))return'Individual';return String(v||'').trim()};
@@ -729,35 +671,111 @@ $('bracketCategory').onchange=async e=>{data.activeCategory=e.target.value||null
 async function loadBracketReview(categoryId){
   const card=$('bracketReviewCard'),body=$('bracketReviewBody'),summary=$('bracketReviewSummary'),badge=$('bracketReviewBadge');
   if(!card||!body||!summary||!badge)return null;
-  if(!categoryId){badge.textContent='SELECT A CATEGORY';summary.innerHTML='';body.innerHTML='<tr><td colspan="5" class="empty">Select a category to review players.</td></tr>';return null;}
-  const c=cat(categoryId); if(!c||isAnyoEvent(c)){badge.textContent='NOT A COMBATIVE CATEGORY';body.innerHTML='<tr><td colspan="5" class="empty">Select a Combative category.</td></tr>';return null;}
+  const selectedId=String(categoryId||'').trim();
+  if(!selectedId){badge.textContent='SELECT A CATEGORY';summary.innerHTML='';body.innerHTML='<tr><td colspan="5" class="empty">Select a category to review players.</td></tr>';return null;}
+
   try{
     if(!window.RADIUM_DB)throw new Error('Supabase database bridge is unavailable.');
-    const init=await window.RADIUM_DB.init(); if(!init?.enabled)throw new Error('The tournament service is not connected.');
-    const tid=window.RADIUM_CLOUD?.getId?.(); if(!tid)throw new Error('No tournament is selected.');
+    const init=await window.RADIUM_DB.init();
+    if(!init?.enabled)throw new Error('The tournament service is not connected.');
+    const tid=window.RADIUM_CLOUD?.getId?.()||activeTournamentId();
+    if(!tid)throw new Error('No tournament is selected.');
+
+    /*
+      V70 issue: the selector could contain a valid category while the local
+      data.categories array was still being refreshed. The old code called
+      cat(categoryId) before the cloud read and immediately returned
+      "NOT A COMBATIVE CATEGORY" when that local lookup missed.
+
+      For Player Review only, resolve the selected category by ID first and
+      use the cloud category as the source of truth. No records are changed.
+    */
+    let c=(Array.isArray(data.categories)?data.categories:[]).find(x=>String(x?.id)===selectedId)||null;
+    const categoryResult=await window.RADIUM_DB.select('categories',{
+      select:'id,tournament_id,name,event_type,gender,event_number,judges,preset,weight_required,bracket_by,age_min,age_max,weight_min,weight_max,division,style,weapon,scoring_type,rules,status',
+      eq:{id:selectedId,tournament_id:tid},
+      limit:1
+    });
+    if(categoryResult.error)throw categoryResult.error;
+    const dbCategory=categoryResult.data?.[0]||null;
+    if(dbCategory){
+      c={
+        ...(c||{}),
+        id:dbCategory.id,
+        name:dbCategory.name,
+        event:dbCategory.event_type==='Anyo'?'Arnis Anyo':(dbCategory.event_type==='Livestick'?'Livestick':'Padded Stick'),
+        event_type:dbCategory.event_type,
+        sex:dbCategory.gender||c?.sex||'Male',
+        eventNumber:dbCategory.event_number||c?.eventNumber||'',
+        judges:Number(dbCategory.judges)||Number(c?.judges)||5,
+        preset:dbCategory.preset||c?.preset||'',
+        ageFrom:Number(dbCategory.age_min),
+        ageTo:Number(dbCategory.age_max),
+        weightFrom:Number(dbCategory.weight_min),
+        weightTo:Number(dbCategory.weight_max),
+        weightRequired:!!dbCategory.weight_required,
+        bracketBy:dbCategory.bracket_by||null,
+        anyoType:dbCategory.division||c?.anyoType||'',
+        anyoStyle:dbCategory.style||c?.anyoStyle||'',
+        anyoWeapon:dbCategory.weapon||c?.anyoWeapon||'Any',
+        draw:dbCategory.rules?.draw||c?.draw||'random'
+      };
+    }
+
+    const eventType=String(c?.event_type||dbCategory?.event_type||'').trim().toLowerCase();
+    const eventName=String(c?.event||'').trim().toLowerCase();
+    const isAnyo=eventType==='anyo'||eventName==='arnis anyo';
+    const isLivestick=eventType==='livestick'||eventName==='livestick';
+    const isCombative=!isAnyo&&!isLivestick&&(eventType==='combative'||eventName==='padded stick'||eventName==='combative'||!!dbCategory);
+    if(!c||!isCombative){
+      badge.textContent='NOT A COMBATIVE CATEGORY';
+      summary.innerHTML='';
+      body.innerHTML='<tr><td colspan="5" class="empty">Select a Combative category.</td></tr>';
+      return null;
+    }
+
     const [reg,pr,wi,cp,tm]=await Promise.all([
-      window.RADIUM_DB.select('category_registrations',{select:'player_id,status',eq:{tournament_id:tid,category_id:categoryId}}),
+      window.RADIUM_DB.select('category_registrations',{select:'player_id,status',eq:{tournament_id:tid,category_id:selectedId}}),
       window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('weigh_ins',{select:'player_id,weight,verified,verified_at',eq:{tournament_id:tid,category_id:categoryId}}),
-      window.RADIUM_DB.select('category_players',{select:'player_id,seed,draw_number,draw_type,drawn_at',eq:{category_id:categoryId}}),
+      window.RADIUM_DB.select('weigh_ins',{select:'player_id,weight,verified,verified_at',eq:{tournament_id:tid,category_id:selectedId}}),
+      window.RADIUM_DB.select('category_players',{select:'player_id,seed,draw_number,draw_type,drawn_at',eq:{category_id:selectedId}}),
       window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}})
     ]);
     for(const r of [reg,pr,wi,cp,tm])if(r.error)throw r.error;
-    const registeredIds=[...new Set((reg.data||[]).filter(r=>!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase())).map(r=>String(r.player_id)).filter(Boolean))];
+
+    let registeredIds=[...new Set((reg.data||[])
+      .filter(r=>!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase()))
+      .map(r=>String(r.player_id||'')).filter(Boolean))];
+
+    /* Local fallback is only for display if the cloud registration query is
+       temporarily empty. It does not create, update, or delete anything. */
+    if(!registeredIds.length&&Array.isArray(data.registrations)){
+      registeredIds=[...new Set(data.registrations
+        .filter(r=>String(r.categoryId??r.category_id)===selectedId&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase()))
+        .map(r=>String(r.playerId??r.player_id??'')).filter(Boolean))];
+    }
+
     const players=new Map((pr.data||[]).map(x=>[String(x.id),x]));
     const weigh=new Map((wi.data||[]).map(x=>[String(x.player_id),x]));
     const seeds=new Map((cp.data||[]).map(x=>[String(x.player_id),x]));
     const teams=new Map((tm.data||[]).map(x=>[String(x.id),x.name||'']));
+
+    const ageFrom=Number.isFinite(Number(c.ageFrom))?Number(c.ageFrom):Number(c.age_min??0);
+    const ageTo=Number.isFinite(Number(c.ageTo))?Number(c.ageTo):Number(c.age_max??99);
+    const weightFrom=Number.isFinite(Number(c.weightFrom))?Number(c.weightFrom):Number(c.weight_min??0);
+    const weightTo=Number.isFinite(Number(c.weightTo))?Number(c.weightTo):Number(c.weight_max??999);
+
     const rows=registeredIds.map(pid=>{
       const p=players.get(pid),w=weigh.get(pid),sr=seeds.get(pid);
       const weight=Number(w?.weight),ageNum=Number(p?.age);
-      const ageOk=Number.isFinite(ageNum)&&ageNum>=Number(c.ageFrom)&&ageNum<=Number(c.ageTo);
+      const ageOk=Number.isFinite(ageNum)&&ageNum>=ageFrom&&ageNum<=ageTo;
       const genderOk=!c.sex||c.sex==='Mixed'||c.sex===p?.gender;
       const combatOk=eCombat(p||{});
-      const weightOk=Number.isFinite(weight)&&weight>=Number(c.weightFrom)&&weight<=Number(c.weightTo);
+      const weightOk=Number.isFinite(weight)&&weight>=weightFrom&&weight<=weightTo;
       const verified=w?.verified===true&&ageOk&&genderOk&&combatOk&&weightOk;
       return {p,w,sr,verified,weight,team:teams.get(String(p?.team_id||''))||'—'};
     });
+
     const verifiedCount=rows.filter(x=>x.verified).length;
     const seededCount=rows.filter(x=>Number.isFinite(Number(x.sr?.seed))).length;
     badge.textContent=`${registeredIds.length} REGISTERED • ${verifiedCount} VERIFIED`;
@@ -769,7 +787,9 @@ async function loadBracketReview(categoryId){
       const wiText=x.verified?'✓ VERIFIED':(x.w?.verified===true?'⚠ VERIFIED BUT NOT CATEGORY-ELIGIBLE':'✗ NOT VERIFIED');
       return `<tr><td class="seed-cell">${seed}</td><td><b>${escLocal(name)}</b><div class="muted">${escLocal(x.p?.player_number||'')}</div></td><td>${escLocal(x.team)}</td><td class="weight-cell">${Number.isFinite(x.weight)?escLocal(x.weight.toFixed(2))+' kg':'—'}</td><td class="${x.verified?'verified':'not-verified'}">${wiText}</td></tr>`;
     }).join(''):'<tr><td colspan="5" class="empty">No registered players found for this category.</td></tr>';
-    const select=$('bracketCategory'),opt=select?.querySelector(`option[value="${CSS.escape(String(categoryId))}"]`);
+
+    const select=$('bracketCategory');
+    const opt=[...(select?.options||[])].find(o=>String(o.value)===selectedId);
     if(opt)opt.textContent=`${c.name} — ${registeredIds.length} registered • ${verifiedCount} verified`;
     return {registered:registeredIds.length,verified:verifiedCount,seeded:seededCount,rows};
   }catch(e){
