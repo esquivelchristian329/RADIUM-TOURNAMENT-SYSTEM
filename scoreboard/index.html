@@ -1037,11 +1037,11 @@ function autoDecideRoundWinner(){
 }
 async function markMatchStarted(){
     if(!currentMatch?.matchId||!window.RADIUM_DB)return;
-    if(currentMatch.status==='IN_PROGRESS'||currentMatch.status==='COMPLETED'||currentMatch.startedAt)return;
+    if(currentMatch.status==='LIVE'||currentMatch.status==='COMPLETED'||currentMatch.startedAt)return;
     await window.RADIUM_DB.init();
-    const r=await window.RADIUM_DB.update('matches',{status:'IN_PROGRESS',started_at:new Date().toISOString(),match_format:currentMatch.matchFormat||'single'},{id:currentMatch.matchId});
+    const r=await window.RADIUM_DB.update('matches',{status:'LIVE',started_at:new Date().toISOString(),match_format:currentMatch.matchFormat||'single'},{id:currentMatch.matchId});
     if(r.error)throw r.error;
-    currentMatch.status='IN_PROGRESS';currentMatch.startedAt=new Date().toISOString();
+    currentMatch.status='LIVE';currentMatch.startedAt=new Date().toISOString();
     const fmt=document.getElementById('matchFormat');if(fmt)fmt.disabled=true;
 }
 function syncMatchFormatLock(){const fmt=document.getElementById('matchFormat');if(!fmt)return;const locked=!!(currentMatch?.status==='IN_PROGRESS'||currentMatch?.status==='COMPLETED'||currentMatch?.startedAt||window.__RADIUM_ROUND_SCORES?.some(Boolean)||completedResultEdit);fmt.disabled=locked;}
