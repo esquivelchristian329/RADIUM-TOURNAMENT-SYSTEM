@@ -426,7 +426,12 @@
         }entryRows0.push({id:e.id,tournament_id:tid,category_id:c.id,entry_type:type,entry_number:e.number||null,style:e.style||c.anyoStyle||'Traditional',weapon:e.weapon||c.anyoWeapon,group_reference:e.groupReference||null,status:e.status||'active',draw_order:Number.isFinite(Number(e.drawOrder))?Number(e.drawOrder):(Number.isFinite(Number((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.draw_order))?Number((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||''))).draw_order):null),draw_type:e.drawType||((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.draw_type)||null,drawn_at:e.drawnAt||((existingAnyo.get(String(e.id))||existingAnyoByKey.get(String(c.id)+'|'+String(type)+'|'+String(e.number||'')))?.drawn_at)||null});mids.forEach((pid,i)=>memberRows0.push({entry_id:e.id,tournament_id:tid,player_id:pid,member_position:i+1}));}
         }
       }
-      const anyoEntries=await materialize('anyo_entries',entryRows0,'Anyo entries sync');
+      // Safety guard: never erase cloud Anyo entries just because this browser has
+      // an empty/stale Anyo roster. Preserve the cloud rows when the local sync has
+      // no entry rows to write. A deliberate category/entry deletion uses its own
+      // explicit delete workflow.
+      const preserveCloudAnyoEntries=entryRows0.length===0&&(existingAnyoRes.data||[]).length>0;
+      const anyoEntries=preserveCloudAnyoEntries?(existingAnyoRes.data||[]):await materialize('anyo_entries',entryRows0,'Anyo entries sync');
       // Keep an explicit local-entry -> Supabase-entry ID map. This is important when
       // a freshly-created local Anyo entry has a temporary/non-UUID ID: performance,
       // registration, and medal rows must always reference the generated Supabase UUID,
@@ -437,11 +442,19 @@
         const cloudId=anyoEntries[i]?.id;
         if(localId&&cloudId)entryIdMap.set(String(localId),String(cloudId));
       }
+      if(preserveCloudAnyoEntries)for(const e of anyoEntries)if(e?.id)entryIdMap.set(String(e.id),String(e.id));
       const toCloudEntryId=id=>entryIdMap.get(String(id))||String(id||'');
       const entryIdSet=new Set(anyoEntries.map(e=>String(e.id)));
       for(const row of memberRows0){row.entry_id=toCloudEntryId(row.entry_id);}
-      await fail('Anyo entry members cleanup',await db.remove('anyo_entry_members',{tournament_id:tid}));
-      if(memberRows0.length)await fail('Anyo entry members sync',await db.insert('anyo_entry_members',memberRows0));
+      // Merge Anyo memberships instead of replacing the whole table on every save.
+      // A browser with a partial/stale roster must not erase members that are already
+      // saved in Supabase. Only insert member links that do not already exist.
+      if(!preserveCloudAnyoEntries && memberRows0.length){
+        const savedMembers=await fail('Anyo entry members read',await db.select('anyo_entry_members',{select:'entry_id,player_id',eq:{tournament_id:tid}}));
+        const savedMemberKeys=new Set((savedMembers.data||[]).map(m=>String(m.entry_id)+'|'+String(m.player_id)));
+        const missingMembers=memberRows0.filter(m=>!savedMemberKeys.has(String(m.entry_id)+'|'+String(m.player_id)));
+        if(missingMembers.length)await fail('Anyo entry members sync',await db.insert('anyo_entry_members',missingMembers));
+      }
       // Keep competition registrations authoritative while preserving existing status.
       const existingRegs=await fail('Registration status read',await db.select('category_registrations',{select:'id,player_id,category_id,anyo_entry_id,status,fee_amount,team_id',eq:{tournament_id:tid}}));
       const regByPlayer=new Map((existingRegs.data||[]).filter(r=>r.player_id).map(r=>[String(r.player_id)+'|'+String(r.category_id),r]));
@@ -477,7 +490,10 @@
         else { delete r.id; const made=await fail('Registration insert',await db.insert('category_registrations',r)); if(made.data?.[0]?.id)r.id=made.data[0].id; }
       }
 
-      const existingEntries=await fail('Anyo entries cleanup read',await db.select('anyo_entries',{select:'id',eq:{tournament_id:tid}}));for(const old of existingEntries.data||[])if(!entryIdSet.has(old.id))await fail('Stale Anyo entry cleanup',await db.remove('anyo_entries',{id:old.id}));
+      // Do not delete Anyo entries during a general tournament sync. The local
+      // state can be temporarily incomplete after importing or reloading a workbook;
+      // entries absent from that snapshot are not proof of an intentional deletion.
+      // Explicit Anyo entry/category deletion must use its dedicated delete workflow.
       const courtCount=Math.max(1,Number(state.setup?.courts)||1);const existingCourts=await fail('Courts read',await db.select('courts',{select:'id,tournament_id,name,court_number,active',eq:{tournament_id:tid}}));const oldByNo=new Map((existingCourts.data||[]).map(x=>[Number(x.court_number),x]));const courtRows=[];for(let i=1;i<=courtCount;i++){const old=oldByNo.get(i);courtRows.push({id:old?.id||null,tournament_id:tid,name:old?.name||('COURT '+i),court_number:i,active:true});}for(const row of courtRows){if(row.id)await fail('Court update',await db.upsertNoReturn('courts',[row],{onConflict:'id'}));else{const x={...row};delete x.id;const r=await fail('Court insert',await db.insert('courts',x));row.id=r.data?.[0]?.id;if(!row.id)throw new Error('Court insert: Supabase did not return generated ID.');}}const courtMap=new Map(courtRows.map(x=>[Number(x.court_number),x.id]));
       const existingMatchState=await fail('Matches state read',await db.select('matches',{select:'id,status,started_at,completed_at,court_id,match_format,category_id,round,match_number,bracket_position,blue_player_id,red_player_id,blue_score,red_score,winner_player_id,metadata',eq:{tournament_id:tid}}));const existingMatchById=new Map((existingMatchState.data||[]).map(x=>[String(x.id),x]));
       const matchRows0=[];const resultByMatch=[];
@@ -505,12 +521,22 @@
       await cleanupTop('players',playerIds,tid,db,fail);await cleanupTop('categories',catIds,tid,db,fail);await cleanupTop('teams',teamIds,tid,db,fail);
       const existingJudges=await fail('Anyo judges read',await db.select('anyo_judges',{select:'id,tournament_id,name,judge_number,active',eq:{tournament_id:tid}}));const judgesByNo=new Map((existingJudges.data||[]).map(j=>[Number(j.judge_number),j]));const judgeByNo=new Map();for(let i=1;i<=5;i++){const old=judgesByNo.get(i);if(old){judgeByNo.set(i,old.id);await fail('Anyo judge update',await db.update('anyo_judges',{name:old.name||('JUDGE '+i),active:true},{id:old.id}));}else{const r=await fail('Anyo judge insert',await db.insert('anyo_judges',{tournament_id:tid,name:'JUDGE '+i,judge_number:i,active:true}));const id=r.data?.[0]?.id;if(!id)throw new Error('Anyo judge insert: Supabase did not return generated ID.');judgeByNo.set(i,id);}}
       const perfRows0=[],scoreRows0=[],deductRows0=[];const anyoCats=new Set(cats.filter(c=>c.event_type==='Anyo').map(c=>c.id));const entryIds=new Set(anyoEntries.map(e=>String(e.id)));for(const r of (state.anyoResults||[])){if(!anyoCats.has(r.categoryId)||!r.competitorId)continue;const entryId=toCloudEntryId(r.entryId||r.competitorId);if(!entryIds.has(String(entryId)))continue;const perfId=r.id;perfRows0.push({id:perfId,tournament_id:tid,category_id:r.categoryId,entry_id:entryId,attempt_number:Math.max(1,Number(r.attemptNumber)||1),player_id:null,team_id:null,performer_index:Number(r.performerIndex)||0,judge_count:Math.min(5,Math.max(3,Number(r.judgeCount)||5)),raw_total:Number(r.rawTotal)||0,kept_total:Number(r.keptTotal)||0,average:Number(r.average)||0,judge_average:Number(r.judgeAverage??r.average)||0,final_score:Number(r.finalScore??r.average)||0,total_deduction:Number(r.totalDeduction)||0,deduction_rates:r.deductionRates||{},dropped_scores:r.dropped||[],elapsed_ms:Number(r.elapsedMs)||0,elapsed_time:r.elapsedTime||null,finished:r.finished!==false,started_at:null,finished_at:r.finishedAt||r.time||new Date().toISOString(),metadata:{categoryName:r.categoryName||'',competitorType:'entry',entryId:entryId}});(r.scores||[]).forEach((score,i)=>{if(score!=null&&judgeByNo.has(i+1))scoreRows0.push({id:null,performance_id:perfId,judge_id:judgeByNo.get(i+1),score:Number(score)});});Object.entries(r.deductions||{}).forEach(([k,q])=>{const qty=Number(q)||0;if(qty>0)deductRows0.push({id:null,performance_id:perfId,violation_type:k==='tv'?'TIME':k==='dv'?'DISARM':k==='lv'?'OUT_OF_MAT':'OTHER',quantity:qty,deduction_amount:(Number(r.deductionRates?.[k])||0)*qty,recorded_by:null});});}
-      const existingPerf=await fail('Anyo performance cleanup read',await db.select('anyo_performances',{select:'id',eq:{tournament_id:tid}}));const perfIds0=new Set(perfRows0.filter(x=>UUID.test(String(x.id||''))).map(x=>x.id));for(const old of existingPerf.data||[])if(!perfIds0.has(old.id))await fail('Stale Anyo performance cleanup',await db.remove('anyo_performances',{id:old.id}));
-      const perfs=await materialize('anyo_performances',perfRows0,'Anyo performances sync');
+      const existingPerf=await fail('Anyo performance cleanup read',await db.select('anyo_performances',{select:'id',eq:{tournament_id:tid}}));
+      let perfs;
+      const preserveCloudPerformanceHistory=(existingPerf.data||[]).length>0;
+      if(preserveCloudAnyoEntries||preserveCloudPerformanceHistory){
+        // Never let a partial/stale browser snapshot delete or replace authoritative cloud score history.
+        // Scoreboard saves go through radium_save_anyo_performance; this bulk sync must not prune it.
+        perfs=existingPerf.data||[];
+      }else{
+        perfs=await materialize('anyo_performances',perfRows0,'Anyo performances sync');
+      }
       const perfMap=new Map();for(let i=0;i<perfs.length;i++){const old=perfRows0[i]?.id;if(old&&!UUID.test(String(old)))perfMap.set(old,perfs[i].id);}
       for(const row of scoreRows0)if(perfMap.has(row.performance_id))row.performance_id=perfMap.get(row.performance_id);for(const row of deductRows0)if(perfMap.has(row.performance_id))row.performance_id=perfMap.get(row.performance_id);
-      for(const perf of perfs) {await fail('Anyo score cleanup',await db.remove('anyo_performance_scores',{performance_id:perf.id}));await fail('Anyo deduction cleanup',await db.remove('anyo_performance_deductions',{performance_id:perf.id}));}
-      for(const row of scoreRows0){delete row.id;await fail('Anyo score insert',await db.insert('anyo_performance_scores',row));}for(const row of deductRows0){delete row.id;await fail('Anyo deduction insert',await db.insert('anyo_performance_deductions',row));}
+      if(!preserveCloudAnyoEntries && !preserveCloudPerformanceHistory){
+        for(const perf of perfs) {await fail('Anyo score cleanup',await db.remove('anyo_performance_scores',{performance_id:perf.id}));await fail('Anyo deduction cleanup',await db.remove('anyo_performance_deductions',{performance_id:perf.id}));}
+        for(const row of scoreRows0){delete row.id;await fail('Anyo score insert',await db.insert('anyo_performance_scores',row));}for(const row of deductRows0){delete row.id;await fail('Anyo deduction insert',await db.insert('anyo_performance_deductions',row));}
+      }
       const medals=(state.medals||[]).filter(m=>m.categoryId&&m.medal).map(m=>{const isAnyo=String(m.source||'')==='anyo';const isTeam=!!m.teamId&&!m.playerId;return{tournament_id:tid,category_id:m.categoryId,entry_id:isAnyo?(m.entryId?toCloudEntryId(m.entryId):null):null,player_id:isAnyo?null:(isTeam?null:(m.playerId||null)),team_id:isAnyo?null:(isTeam?m.teamId:null),medal:m.medal,source:m.source||'combat',score:Number.isFinite(Number(m.score))?Number(m.score):null,awarded_at:m.awardedAt||new Date().toISOString()}});await fail('Medals cleanup',await db.remove('tournament_medals',{tournament_id:tid}));for(const m of medals)await fail('Medal insert',await db.insert('tournament_medals',m));
       const wi=[];Object.entries(state.weighIns||{}).forEach(([key,w])=>{if(!w?.categoryId||!w?.playerId||!playerIds.has(String(w.playerId))||!catIds.has(String(w.categoryId)))return;wi.push({id:UUID.test(String(w.id||''))?w.id:null,tournament_id:tid,category_id:w.categoryId,player_id:w.playerId,weight:Number.isFinite(Number(w.weight))?Number(w.weight):null,verified:!!w.verified,verified_at:w.verifiedAt||null,updated_at:w.updatedAt||new Date().toISOString()})});for(const row of wi){if(row.id){await fail('Weigh-in update',await db.update('weigh_ins',row,{id:row.id}));}else{const existing=await fail('Weigh-in lookup',await db.select('weigh_ins',{select:'id',eq:{tournament_id:tid,category_id:row.category_id,player_id:row.player_id},limit:1}));if(existing.data?.[0]){row.id=existing.data[0].id;await fail('Weigh-in update',await db.update('weigh_ins',row,{id:row.id}));}else{delete row.id;const made=await fail('Weigh-in insert',await db.insert('weigh_ins',row));const id=made.data?.[0]?.id;if(id)replaceIds(state,Object.values(state.weighIns||{}).find(x=>x&&x.categoryId===row.category_id&&String(x.playerId||'')===String(row.player_id))?.id,id);}}}
       const auditRows=(state.audit||[]).map(a=>({id:a.id,tournament_id:tid,user_id:null,role:role()||'admin',action:String(a.action||'TOURNAMENT EVENT'),entity_type:a.entityType||null,entity_id:UUID.test(String(a.entityId||''))?a.entityId:null,old_value:a.oldValue??null,new_value:a.newValue??(a.detail!=null?{detail:String(a.detail)}:null),created_at:a.time||new Date().toISOString()}));for(const a of auditRows){if(UUID.test(String(a.id||''))){const existing=await fail('Audit lookup',await db.select('audit_logs',{select:'id',eq:{id:a.id},limit:1}));if(!existing.data?.length){const x={...a};delete x.id;const r=await fail('Audit insert',await db.insert('audit_logs',x));const made=r.data?.[0]?.id;if(made)replaceIds(state,a.id,made);}}else{const x={...a};delete x.id;const r=await fail('Audit insert',await db.insert('audit_logs',x));const made=r.data?.[0]?.id;if(made)replaceIds(state,a.id,made);}}
@@ -621,8 +647,29 @@
       }
       const localTeams=teamRows.map(t=>({id:t.id,name:t.name,code:t.abbreviation||'',logo:t.logo_url||'',coach:t.coach||'',manager:t.manager||''}));
       localPlayers.forEach(p=>{cpRows.filter(x=>x.player_id===p.id).forEach(x=>{p.categorySeeds[x.category_id]={seed:x.seed,drawNumber:x.draw_number,drawType:x.draw_type,drawnAt:x.drawn_at}});const rows=anyoByPlayer.get(p.id)||[];if(rows.length){const ind=rows.filter(r=>r.division==='Individual'),syncRows=rows.filter(r=>r.division==='Synchronized'),comboRows=a=>a.map(r=>`${r.style}|${r.weapon}`);p.events={...(p.events||{}),anyoIndividual:ind.length>0,anyoTeam:syncRows.length>0,anyoIndividualEvents:[...new Set(comboRows(ind))],anyoSynchronizedEvents:[...new Set(comboRows(syncRows))],anyoTraditional:rows.some(r=>r.style==='Traditional'),anyoNonTraditional:rows.some(r=>r.style==='Non-Traditional'),anyoTraditionalWeapons:[...new Set(rows.filter(r=>r.style==='Traditional').map(r=>r.weapon))],anyoNonTraditionalWeapons:[...new Set(rows.filter(r=>r.style==='Non-Traditional').map(r=>r.weapon))]};p.events.anyoWeapons=p.events.anyoTraditionalWeapons[0]||p.events.anyoNonTraditionalWeapons[0]||'Single Weapon';}});
-      const matchRows=matches.data||[];const resultRows=results.data||[];const resultByMatch=new Map(resultRows.map(r=>[r.match_id,r]));const categoryLocal=catRows.map(c=>{const rounds=[];const ms=matchRows.filter(m=>m.category_id===c.id).sort((a,b)=>a.round-b.round||a.match_number-b.match_number);for(const m of ms){const ri=Math.max(0,Number(m.round)-1),mi=Math.max(0,Number(m.match_number)-1);if(!rounds[ri])rounds[ri]=[];const meta=m.metadata||{};const rr=resultByMatch.get(m.id);const courtNo=Number((courts.data||[]).find(x=>x.id===m.court_id)?.court_number)||null;rounds[ri][mi]={id:m.id,red:m.red_player_id||null,blue:m.blue_player_id||null,redScore:Number(m.red_score)||0,blueScore:Number(m.blue_score)||0,completed:['COMPLETED','BYE'].includes(String(m.status)),winner:m.winner_player_id||null,redBye:!!meta.redBye,blueBye:!!meta.blueBye,court:courtNo,matchFormat:m.match_format==='single'?'single':'best3',history:meta.history||[],nextMatchId:meta.nextMatchId||null,nextSlot:meta.nextSlot||null,firstRoundPosition:meta.firstRoundPosition??null};}
-        let b=c.bracket||{};b={...b,rounds:rounds.map(r=>r||[]),locked:!!(b.locked||row.settings?.locked)};const depedCat=String(row.settings?.competitionProgram||row.settings?.competition_program||'').toUpperCase()==='DEPED_PEKAF'&&c.event_type!=='Anyo';return{id:c.id,name:c.name,sex:c.gender||'Male',event:c.event_type==='Anyo'?'Arnis Anyo':(c.event_type==='Livestick'?'Livestick':'Padded Stick'),eventNumber:c.event_number||'',judges:Number(c.judges)||5,preset:c.preset||'',anyoType:c.division||'',anyoStyle:c.style||'',anyoWeapon:c.weapon||'Any',ageFrom:Number(c.age_min)||0,ageTo:Number(c.age_max)||99,weightFrom:Number(c.weight_min)||0,weightTo:Number(c.weight_max)||999,weightRequired:depedCat||!!c.weight_required,bracketBy:depedCat?'weight':(c.bracket_by||null),draw:c.rules?.draw||'random',bracket:b};});
+      const matchRows=matches.data||[];const resultRows=results.data||[];const resultByMatch=new Map(resultRows.map(r=>[r.match_id,r]));const categoryLocal=catRows.map(c=>{const rounds=[];const ms=matchRows.filter(m=>m.category_id===c.id).sort((a,b)=>a.round-b.round||a.match_number-b.match_number);for(const m of ms){const ri=Math.max(0,Number(m.round)-1),mi=Math.max(0,Number(m.match_number)-1);if(!rounds[ri])rounds[ri]=[];const meta=m.metadata||{};const rr=resultByMatch.get(m.id);const courtNo=Number((courts.data||[]).find(x=>x.id===m.court_id)?.court_number)||null;rounds[ri][mi]={id:m.id,red:m.red_player_id||null,blue:m.blue_player_id||null,redScore:Number(m.red_score)||0,blueScore:Number(m.blue_score)||0,status:String(m.status||'READY').toUpperCase(),completed:['COMPLETED','BYE'].includes(String(m.status)),winner:m.winner_player_id||null,redBye:!!meta.redBye,blueBye:!!meta.blueBye,court:courtNo,matchFormat:m.match_format==='single'?'single':'best3',history:meta.history||[],nextMatchId:meta.nextMatchId||null,nextSlot:meta.nextSlot||null,firstRoundPosition:meta.firstRoundPosition??null};}
+        let b=c.bracket||{};
+      // Preserve bracket routing from the saved category bracket before normalized
+      // match rows replace its rounds. Older match rows may have NULL nextMatchId.
+      const savedRounds=Array.isArray(b.rounds)?b.rounds:[];
+      const savedById=new Map();
+      savedRounds.forEach((rr,ri)=>(rr||[]).forEach((sm,mi)=>{if(sm?.id)savedById.set(String(sm.id),{match:sm,ri,mi});}));
+      const normalizedRounds=rounds.map(r=>r||[]);
+      for(let ri=0;ri<normalizedRounds.length;ri++){
+        for(let mi=0;mi<normalizedRounds[ri].length;mi++){
+          const m=normalizedRounds[ri][mi]; if(!m)continue;
+          const saved=savedById.get(String(m.id))?.match || savedRounds[ri]?.[mi] || null;
+          if(!m.nextMatchId && saved?.nextMatchId)m.nextMatchId=saved.nextMatchId;
+          if(!m.nextSlot && saved?.nextSlot)m.nextSlot=saved.nextSlot;
+          // Generic compatibility for legacy matches without routing metadata.
+          // Explicit saved links always win; structural fallback uses bracket order.
+          if(!m.nextMatchId && ri<normalizedRounds.length-1 && normalizedRounds[ri+1]?.length){
+            const parentIndex=Math.floor(mi/2), parent=normalizedRounds[ri+1][parentIndex];
+            if(parent?.id){m.nextMatchId=parent.id;m.nextSlot=(mi%2===0)?'red':'blue';}
+          }
+        }
+      }
+      b={...b,rounds:normalizedRounds,locked:!!(b.locked||row.settings?.locked)};const depedCat=String(row.settings?.competitionProgram||row.settings?.competition_program||'').toUpperCase()==='DEPED_PEKAF'&&c.event_type!=='Anyo';return{id:c.id,name:c.name,sex:c.gender||'Male',event:c.event_type==='Anyo'?'Arnis Anyo':(c.event_type==='Livestick'?'Livestick':'Padded Stick'),eventNumber:c.event_number||'',judges:Number(c.judges)||5,preset:c.preset||'',anyoType:c.division||'',anyoStyle:c.style||'',anyoWeapon:c.weapon||'Any',ageFrom:Number(c.age_min)||0,ageTo:Number(c.age_max)||99,weightFrom:Number(c.weight_min)||0,weightTo:Number(c.weight_max)||999,weightRequired:depedCat||!!c.weight_required,bracketBy:depedCat?'weight':(c.bracket_by||null),draw:c.rules?.draw||'random',bracket:b};});
       const localResults=resultRows.map(r=>{const m=matchRows.find(x=>x.id===r.match_id),c=categoryLocal.find(x=>x.id===m?.category_id),bp=localPlayers.find(p=>p.id===m?.blue_player_id),rp=localPlayers.find(p=>p.id===m?.red_player_id),wp=localPlayers.find(p=>p.id===r.winner_player_id);return{id:r.id,time:r.created_at,completedAt:r.created_at,court:m?.court_id?((courts.data||[]).find(x=>x.id===m.court_id)?.court_number||1):1,categoryId:c?.id||m?.category_id,category:c?.name||'',round:m?.round||1,match:m?.match_number||1,blue:bp?.name||m?.blue_player_id||'',red:rp?.name||m?.red_player_id||'',blueScore:Number(r.blue_score)||0,redScore:Number(r.red_score)||0,winner:r.winner_player_id||'',winnerSide:r.winner_player_id===m?.blue_player_id?'BLUE':'RED',blueFouls:r.blue_fouls||0,redFouls:r.red_fouls||0,blueDisarms:r.blue_disarms||0,redDisarms:r.red_disarms||0,roundScores:m?.metadata?.roundScores||[],official:'Scoreboard',finished:true};});
       const judgeById=new Map((judges.data||[]).map(j=>[j.id,j]));const scoreByPerf=new Map();(perfScores.data||[]).forEach(s=>{if(!scoreByPerf.has(s.performance_id))scoreByPerf.set(s.performance_id,[]);scoreByPerf.get(s.performance_id).push(s)});const dedByPerf=new Map();(perfDeductions.data||[]).forEach(d=>{if(!dedByPerf.has(d.performance_id))dedByPerf.set(d.performance_id,[]);dedByPerf.get(d.performance_id).push(d)});const localAnyo=(perfs.data||[]).map(p=>{const ss=(scoreByPerf.get(p.id)||[]).sort((a,b)=>Number(judgeById.get(a.judge_id)?.judge_number||0)-Number(judgeById.get(b.judge_id)?.judge_number||0)).map(s=>Number(s.score));const ds=dedByPerf.get(p.id)||[];const deductions={tv:0,dv:0,lv:0,fp:0};ds.forEach(d=>{const k=d.violation_type==='TIME'?'tv':d.violation_type==='DISARM'?'dv':d.violation_type==='OUT_OF_MAT'?'lv':'fp';deductions[k]=(deductions[k]||0)+Number(d.quantity||0)});return{id:p.id,time:p.created_at,finishedAt:p.finished_at,finished:p.finished,attemptNumber:Math.max(1,Number(p.attempt_number)||1),categoryId:p.category_id,categoryName:categoryLocal.find(c=>c.id===p.category_id)?.name||'',competitorType:'entry',competitorId:p.entry_id||p.id,entryId:p.entry_id||p.id,judgeCount:p.judge_count,rawTotal:Number(p.raw_total)||0,dropped:p.dropped_scores||[],keptTotal:Number(p.kept_total)||0,average:Number(p.average)||0,judgeAverage:Number(p.judge_average)||0,finalScore:Number(p.final_score)||0,deductions,deductionRates:p.deduction_rates||{},totalDeduction:Number(p.total_deduction)||0,scores:ss,elapsedMs:Number(p.elapsed_ms)||0,elapsedTime:p.elapsed_time||'',performerIndex:Number(p.performer_index)||0};});
       const localMedals=(medals.data||[]).map(m=>({id:m.id,categoryId:m.category_id,entryId:m.entry_id||'',playerId:m.player_id||'',teamId:m.team_id||'',medal:m.medal,source:m.source,score:Number(m.score)||0,awardedAt:m.awarded_at}));const localWi={};(weighins.data||[]).forEach(w=>{localWi[String(w.category_id)+'|'+String(w.player_id)]={id:w.id,categoryId:w.category_id,weight:Number(w.weight)||0,verified:!!w.verified,verifiedAt:w.verified_at,updatedAt:w.updated_at}});const localAudit=(audit.data||[]).map(a=>({id:a.id,time:a.created_at,action:a.action,detail:a.new_value?.detail||'',entityType:a.entity_type,entityId:a.entity_id,oldValue:a.old_value,newValue:a.new_value}));const membersByEntry=new Map();(anyoEntryMembers.data||[]).forEach(m=>{if(!membersByEntry.has(m.entry_id))membersByEntry.set(m.entry_id,[]);membersByEntry.get(m.entry_id).push(m)});const localEntries=(anyoEntries.data||[]).map(e=>({id:e.id,number:e.entry_number||'',type:e.entry_type,categoryId:e.category_id,style:e.style,weapon:e.weapon,groupReference:e.group_reference||'',status:e.status,drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,drawType:e.draw_type||null,drawnAt:e.drawn_at||null,memberIds:(membersByEntry.get(e.id)||[]).sort((a,b)=>a.member_position-b.member_position).map(m=>m.player_id)}));
@@ -640,12 +687,26 @@ window.__RADIUM_SET_DATA(
 );this.state.lastSync=row.updated_at||new Date().toISOString();this.state.tournamentId=id;this.state.assignedStatus=String(row.status||'').toLowerCase();this.state.loaded=true;document.body.classList.toggle('locked',String(row.status||'').toLowerCase()==='active' || !!incoming.locked);this.state.lastError=null;this.setStatus('TOURNAMENT DATA LOADED',true);try{window.renderAll?.();}catch(renderErr){console.error('RADIUM render after cloud load failed; cloud data remains loaded:',renderErr);}return true;
     }catch(e){this.state.lastError=e;this.setStatus('LOAD ERROR',false,'The tournament data could not be loaded: '+this.errorText(e));console.error('RADIUM cloud pull failed:',e);return false}},
     scheduleSync(){if(!window.RADIUM_AUTH?.user||!this.getId())return;changeVersion++;this.state.dirty=true;if(syncing||startingPush||categoryDeleteInProgress){syncAgain=true;return;}clearTimeout(timer);timer=setTimeout(()=>{if(syncing||startingPush||categoryDeleteInProgress){syncAgain=true;return;}this.push();},350)},
+    async waitForIdle(timeoutMs=30000){
+      const started=Date.now();
+      while(syncing||startingPush||categoryDeleteInProgress){
+        if(Date.now()-started>=timeoutMs)throw new Error('Timed out waiting for the previous tournament save to finish. No new data was reported as saved.');
+        await new Promise(resolve=>setTimeout(resolve,40));
+      }
+      return true;
+    },
     async saveNow(overridePayload=null){
+      await this.waitForIdle();
       clearTimeout(timer);
       timer=null;
       return await this.push(overridePayload);
     },
-    flush(){clearTimeout(timer);timer=null;return this.push()},
+    async flush(){
+      await this.waitForIdle();
+      clearTimeout(timer);
+      timer=null;
+      return await this.push();
+    },
     async loadAssignedTournamentForStaff(){
       if(!(await this.init()))throw new Error('Supabase is not configured.');
       if(!['tournament_manager','accountant','table_official'].includes(role()))throw new Error('Assigned staff account required.');

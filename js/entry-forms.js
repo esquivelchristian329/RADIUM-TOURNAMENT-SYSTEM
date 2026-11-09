@@ -532,6 +532,11 @@
     if(!canManage())return alert('Admin or Tournament Manager access is required to import registration files.');
     if(state().locked)return alert('Tournament is locked. Unlock it before importing registrations.');
     if(!imported)return;
+    const cloud=window.RADIUM_CLOUD;
+    const importTournamentId=String(cloud?.getId?.()||'');
+    if(!importTournamentId)return notify('<b>Import stopped.</b> Create or select a tournament and wait for it to load before importing players.','error');
+    if(cloud?.state?.loaded!==true)return notify('<b>Import stopped.</b> The selected tournament has not finished loading from Supabase. Reload the tournament before importing.','error');
+    if(!String(state().setup?.name||'').trim())return notify('<b>Import stopped.</b> Save the tournament setup before importing players.','error');
     const s=state();let created=0,updated=0,createdTeams=0,registrations=0;
     for(const r of imported.players){
       let t=r.team?teamByName(r.team):null;
@@ -654,10 +659,15 @@
     }
     if(groupsCreated)log('ANYO GROUPS MATCHED',`${groupsCreated} Synchronized/Mixed group entr${groupsCreated===1?'y':'ies'} created from Group Name / Group Reference.`);
     if(typeof save==='function')save();
-    const cloudOk=await window.RADIUM_CLOUD?.flush?.();
-    if(!cloudOk){
+    const cloudOk=await cloud.flush();
+    if(String(cloud.getId()||'')!==importTournamentId){
       window.renderAll?.();
-      const cloudReason=window.RADIUM_CLOUD?.state?.lastError?.message||'The service did not confirm the save.';
+      notify('<b>Import was not confirmed.</b> The active tournament changed during import. Reload the intended tournament and check its saved registrations before retrying.','error');
+      return;
+    }
+    if(!cloudOk||cloud.state?.lastError){
+      window.renderAll?.();
+      const cloudReason=cloud.state?.lastError?.message||'The service did not confirm the save.';
       notify('<b>Import was not confirmed by the RADIUM Tournament Service.</b> '+esc(cloudReason)+' RADIUM kept the import preview so it is not silently lost. Correct the reported issue before retrying.','error');
       return;
     }

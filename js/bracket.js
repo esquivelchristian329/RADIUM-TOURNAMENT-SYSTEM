@@ -138,14 +138,15 @@ async function loadAnyoPerformerDirectory(){
     }
     // Do not depend on cloud-sync state. The ANYO page reads the authoritative
     // tournament rows directly, which avoids the old empty-list state problem.
-    const [cr,er,mr,pr,tr]=await Promise.all([
+    const [cr,er,mr,pr,tr,rr]=await Promise.all([
       window.RADIUM_DB.select('categories',{select:'id,name,event_type,gender,event_number,judges,preset,division,style,weapon,age_min,age_max,status',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('anyo_entries',{select:'id,tournament_id,category_id,entry_type,entry_number,style,weapon,group_reference,status,draw_order,draw_type,drawn_at',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('anyo_entry_members',{select:'entry_id,tournament_id,player_id,member_position',eq:{tournament_id:tid}}),
       window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}})
+      window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}}),
+      window.RADIUM_DB.select('category_registrations',{select:'id,category_id,player_id,anyo_entry_id,status,team_id',eq:{tournament_id:tid}})
     ]);
-    for(const q of [cr,er,mr,pr,tr])if(q?.error)throw q.error;
+    for(const q of [cr,er,mr,pr,tr,rr])if(q?.error)throw q.error;
 
     const categories=(cr.data||[]).filter(c=>String(c.event_type||'').trim().toLowerCase()==='anyo');
     const players=new Map((pr.data||[]).map(p=>[String(p.id),p]));
@@ -161,16 +162,67 @@ async function loadAnyoPerformerDirectory(){
       const people=members.map(m=>players.get(String(m.player_id))).filter(Boolean);
       const names=people.map(p=>[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ')).filter(Boolean);
       const teamNames=[...new Set(people.map(p=>teams.get(String(p.team_id))?.name).filter(Boolean))];
-      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberCount:people.length,rawMemberCount:members.length};
+      return {id:e.id,categoryId:e.category_id,number:e.entry_number||'',type:e.entry_type||'Individual',style:e.style||'Traditional',weapon:e.weapon||'Any',status:e.status||'active',drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,names,team:teamNames.join(' / ')||'No Team',memberIds:members.map(m=>String(m.player_id)).filter(Boolean),memberCount:people.length,rawMemberCount:members.length};
     });
     const entryIds=new Set(entries.map(e=>String(e.id)));
     const activeCategories=categories.filter(c=>entries.some(e=>String(e.categoryId)===String(c.id))||categories.length);
     const unresolved=entries.filter(e=>e.rawMemberCount>0&&e.memberCount===0).length;
     const orphan=entries.filter(e=>!categories.some(c=>String(c.id)===String(e.categoryId))).length;
+    const anyoCategoryIds=new Set(categories.map(c=>String(c.id)));
+    const activeAnyoRegistrations=(rr.data||[]).filter(r=>anyoCategoryIds.has(String(r.category_id))&&!['CANCELLED','DELETED','WITHDRAWN','NO_SHOW'].includes(String(r.status||'ACTIVE').toUpperCase()));
+    const unlinkedAnyoRegistrations=activeAnyoRegistrations.filter(r=>!r.player_id&&!r.anyo_entry_id).length;
+    const danglingAnyoEntryRegistrations=activeAnyoRegistrations.filter(r=>r.anyo_entry_id&&!entries.some(e=>String(e.id)===String(r.anyo_entry_id))).length;
 
     const weaponOrder={'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3};
     const divisionOrder={'Individual':1,'Synchronized':2,'Mixed':3};
-    const divisionOf=c=>{const label=String(c.name||'').toLowerCase();if(label.includes('secondary'))return 'Secondary';if(label.includes('elementary'))return 'Elementary';const min=Number(c.age_min),max=Number(c.age_max);if(Number.isFinite(min)&&Number.isFinite(max)){if(max<=12)return 'Elementary';if(min>=13)return 'Secondary';}return 'Elementary'};
+    // Anyo school level must come from the category's explicit preset/level,
+    // never from the overlapping age ranges (Elementary 1-13 / Secondary 1-18).
+    const divisionOf=c=>{
+      const preset=String(c?.preset||'').toUpperCase();
+      const level=String(c?.school_level||c?.level||'').toLowerCase();
+      if(preset.includes('ELEMENTARY')||level==='elementary')return 'Elementary';
+      if(preset.includes('SECONDARY')||level==='secondary')return 'Secondary';
+      return String(c?.name||'').toLowerCase().includes('secondary')?'Secondary':'Elementary';
+    };
+    const anyoEntryHasElementaryRegistration=(entry, allEntries, playerMap, elementaryCategories)=>{
+      const ids=(entry?.memberIds||[]).map(String).filter(Boolean);
+      if(!ids.length)return false;
+      const elementaryIds=new Set(elementaryCategories.map(c=>String(c.id)));
+      return allEntries.some(other=>{
+        if(String(other?.id)===String(entry?.id))return false;
+        if(!elementaryIds.has(String(other?.categoryId)))return false;
+        if(['deleted','withdrawn'].includes(String(other?.status||'').toLowerCase()))return false;
+        const otherIds=(other?.memberIds||[]).map(String).filter(Boolean);
+        if(!otherIds.length)return false;
+        // Individual: the same athlete is registered in Elementary.
+        if(String(entry?.type||'Individual').toLowerCase()==='individual'){
+          return ids.some(id=>otherIds.includes(id));
+        }
+        // Synchronized/Mixed: treat the group as the same registration when
+        // the member sets overlap substantially (or exactly), not merely one
+        // unrelated athlete from the same team.
+        const overlap=ids.filter(id=>otherIds.includes(id)).length;
+        const minSize=Math.min(ids.length,otherIds.length);
+        return minSize>0 && overlap===minSize;
+      });
+    };
+    const secondaryEntryConflictsWithElementary=(entry, category, allEntries, playerMap, elementaryCategories)=>{
+      if(divisionOf(category)!=='Secondary')return false;
+      const memberIds=(entry?.memberIds||[]).map(String).filter(Boolean);
+      if(!memberIds.length)return false;
+      const elementaryMax=Math.max(0,...elementaryCategories.map(c=>Number(c.age_max)).filter(Number.isFinite));
+      if(!elementaryMax)return false;
+      // Only suppress a Secondary duplicate when the same performer/group is
+      // also registered in Elementary AND the member is within the Elementary
+      // age range. This fixes duplicate cross-level registrations without
+      // using age alone to decide school level.
+      const hasElementaryRegistration=anyoEntryHasElementaryRegistration(entry,allEntries,playerMap,elementaryCategories);
+      if(!hasElementaryRegistration)return false;
+      return memberIds.some(id=>{
+        const p=playerMap.get(id);
+        return p&&Number.isFinite(Number(p.age))&&Number(p.age)<=elementaryMax;
+      });
+    };
     const sortedCategories=[...categories].sort((a,b)=>{
       const da=divisionOf(a),db=divisionOf(b); if(da!==db)return da==='Elementary'?-1:1;
       const wa=weaponOrder[a.weapon]||99,wb=weaponOrder[b.weapon]||99; if(wa!==wb)return wa-wb;
@@ -183,11 +235,13 @@ async function loadAnyoPerformerDirectory(){
     const options=(division)=>sortedCategories.filter(c=>divisionOf(c)===division).map(c=>`<option value="${esc(c.id)}">${esc(c.name.replace(/^Elementary\s*•\s*|^Secondary\s*•\s*/i,''))}</option>`).join('');
     const selector=`<div class="anyo-category-selector card"><div><b>SELECT ANYO CATEGORY</b><div class="muted">Choose one category to display its performer list.</div></div><select id="anyoPerformerCategory" class="search"><option value="">SELECT CATEGORY</option>${sortedCategories.filter(c=>divisionOf(c)==='Elementary').length?`<optgroup label="ELEMENTARY">${options('Elementary')}</optgroup>`:''}${sortedCategories.filter(c=>divisionOf(c)==='Secondary').length?`<optgroup label="SECONDARY">${options('Secondary')}</optgroup>`:''}</select></div>`;
     const toolbar=`<div class="anyo-cloud-toolbar"><div><b>ANYO PERFORMERS — SUPABASE</b><span class="muted">${categories.length} categories • ${entries.length} entries • ${entries.reduce((n,e)=>n + (Number(e.memberCount) || 0), 0)} performers</span></div><button type="button" class="btn" id="refreshAnyoPerformersBtn">REFRESH</button></div>`;
-    const warning=(unresolved||orphan)?`<div class="card" style="margin-bottom:16px;border-left:4px solid #d97706"><b>ANYO DATA CHECK</b><div class="muted" style="margin-top:5px">${unresolved} entries have member rows whose players could not be resolved; ${orphan} entries reference a missing category. Existing Supabase data was not changed.</div></div>`:'';
+    const warning=(unresolved||orphan||unlinkedAnyoRegistrations||danglingAnyoEntryRegistrations)?`<div class="card" style="margin-bottom:16px;border-left:4px solid #d97706"><b>ANYO DATA CHECK — ACTION REQUIRED</b><div class="muted" style="margin-top:5px">${unlinkedAnyoRegistrations} active Anyo registrations have neither a player ID nor an Anyo entry ID; ${danglingAnyoEntryRegistrations} point to missing Anyo entries; ${unresolved} entries have member rows whose players could not be resolved; ${orphan} entries reference a missing category. Unlinked registrations cannot be assigned to athletes automatically. Re-import or repair them from the original registration source. This screen is read-only and has not changed Supabase.</div></div>`:' ';
     let cards='';
     if(selectedCategory){
       const c=selectedCategory;
-      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id));
+      const elementaryCategories=categories.filter(x=>divisionOf(x)==='Elementary');
+      const playerMap=players;
+      const rawRows=entries.filter(e=>String(e.categoryId)===String(c.id)&&!secondaryEntryConflictsWithElementary(e,c,entries,playerMap,elementaryCategories));
       const rows=[...rawRows].sort((a,b)=>{const ad=Number(a.drawOrder),bd=Number(b.drawOrder);if(Number.isFinite(ad)&&Number.isFinite(bd))return ad-bd||String(a.number).localeCompare(String(b.number));if(Number.isFinite(ad))return -1;if(Number.isFinite(bd))return 1;return String(a.number).localeCompare(String(b.number));});
       const body=rows.length?rows.map((e,i)=>{
         const name=e.names.length?e.names.join(' + '):(e.rawMemberCount?`PLAYER RECORD NOT RESOLVED • ${e.number||e.id}`:(e.number||e.id));
@@ -249,7 +303,15 @@ function openAnyoCategoryDetail(id){
 
 function normalizeBracketPlayerIds(){const ids=new Set((Array.isArray(data.players)?data.players:[]).map(p=>p.id));(Array.isArray(data.categories)?data.categories:[]).forEach(c=>{const b=c?.bracket;if(!b)return;const rounds=Array.isArray(b.rounds)?b.rounds:[];rounds.forEach(r=>{if(!Array.isArray(r))return;r.forEach(m=>{if(!m||typeof m!=='object')return;['red','blue','winner'].forEach(k=>{const v=m[k];if(v&&typeof v==='object')m[k]=v.id||v.playerId||null;else if(v&&!ids.has(v)&&typeof v==='string')m[k]=v;});});});if(b.champion&&typeof b.champion==='object')b.champion=b.champion.id||null;});}
 function save(options={}){const st=$('saveState');if(st)st.textContent='CLOUD SAVE QUEUED '+new Date().toLocaleTimeString();try{window.RADIUM_CLOUD?.scheduleSync?.()}catch(e){console.warn('Cloud sync schedule:',e)}return true;}
-function createFreshData(){return {version:16,tournamentId:activeTournamentId()||null,storageNamespace:null,setup:{name:'',date:new Date().toISOString().slice(0,10),venue:'',organizer:'',courts:2,duration:60,type:'single',competitionProgram:'GENERAL',matchFlow:'ROUND_CATEGORY',gold:5,silver:3,bronze:1,pin:'',billingMode:'PAID',currency:'PHP',scoreboardLogos:['','','','']},teams:[],players:[],categories:[],results:[],medals:[],audit:[],activeCategory:null,locked:false,anyoResults:[],weighIns:{},anyoEntries:[]};}
+function createFreshData(){return {version:16,tournamentId:activeTournamentId()||null,storageNamespace:null,setup:{name:'',date:new Date().toISOString().slice(0,10),venue:'',organizer:'',courts:2,duration:60,type:'single',competitionProgram:'GENERAL',matchFlow:'ROUND_CATEGORY',gold:5,silver:3,bronze:1,pin:'',billingMode:'PAID',currency:'PHP',scoreboardLogos:['','','','']},teams:[],players:[],categories:[],registrations:[],categoryPlayers:[],results:[],medals:[],audit:[],activeCategory:null,locked:false,anyoResults:[],weighIns:{},anyoEntries:[]};}
+function normalizeDataCollections(){
+  const arrayKeys=['teams','players','categories','registrations','categoryPlayers','results','medals','audit','anyoResults','anyoEntries'];
+  for(const key of arrayKeys)if(!Array.isArray(data[key]))data[key]=[];
+  if(!data.weighIns||typeof data.weighIns!=='object'||Array.isArray(data.weighIns))data.weighIns={};
+  if(!data.setup||typeof data.setup!=='object')data.setup=createFreshData().setup;
+  if(!Array.isArray(data.setup.scoreboardLogos))data.setup.scoreboardLogos=['','','',''];
+  return data;
+}
 function resetAllData(){
   if(!confirm('DELETE ALL TOURNAMENT DATA?\n\nThis permanently deletes every RADIUM tournament from this device and the tournament service, including players, teams, categories, brackets, matches, results, medal tallies, Anyo scores, history and audit logs.\n\nThis cannot be undone.')) return;
   const typed=prompt('Type DELETE ALL to confirm.');
@@ -278,7 +340,7 @@ function combatWeighInRecord(p,c){if(!p||!c)return null;const key=String(c.id)+'
 function categoryRequiresVerifiedWeighIn(c){return !!(c&&(c.weightRequirement==='required'||c.weightRequired===true||c.bracketBy==='weight'||String(c.preset||'').toUpperCase()==='DEPED-PEKAF-COMBATIVES-12-17'));}
 function eligible(p,c){const a=age(p.age ?? p.birth);if(a===''||a<c.ageFrom||a>c.ageTo)return false;if(c.sex&&c.sex!=='Mixed'&&c.sex!==p.sex)return false;const ev=c.event||'';if(ev==='Arnis Anyo'){const e=p.events||{};if(c.anyoType==='Individual'&&!e.anyoIndividual)return false;if(c.anyoType==='Synchronized'&&!e.anyoTeam)return false;if(c.anyoType==='Mixed')return false;const style=c.anyoStyle||'Traditional';const styleFlag=style==='Traditional'?e.anyoTraditional:e.anyoNonTraditional;if(styleFlag===false)return false;const weapons=anyoStyleWeapons(e,style,c.anyoType==='Individual'?'Individual':'Synchronized');if(c.anyoWeapon&&c.anyoWeapon!=='Any'&&!weapons.includes(c.anyoWeapon))return false;return true}if(ev==='Livestick')return p.events?.livestick===true&&p.weight>=c.weightFrom&&p.weight<=c.weightTo;if(!eCombat(p))return false;if(categoryRequiresVerifiedWeighIn(c)){const wi=combatWeighInRecord(p,c);return !!wi&&wi.weight>=Number(c.weightFrom)&&wi.weight<=Number(c.weightTo)}return p.weight>=c.weightFrom&&p.weight<=c.weightTo}function eCombat(p){return p.events?.combat!==false&&(p.events?.combat===true||!p.events)}
 function showPage(id){const page=$(id);if(!page)return;const lockedPages=new Set(['setupPage','playersPage','teamsPage','categoriesPage','entryFormsPage','drawLotsPage','weighinPage']);if(data.locked&&lockedPages.has(id)){toast('Tournament is active and locked. Preparation controls are unavailable.');return;}document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'));page.classList.add('active');document.querySelectorAll('.nav-item[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page===id));const title=page.querySelector('.page-heading h2')?.textContent||({'dashboardPage':'Dashboard','bracketPage':'Brackets','anyoPage':'Anyo','queuePage':'Match Queue','resultsPage':'Results','reportsPage':'Reports'}[id]||'RADIUM');if($('topPageTitle'))$('topPageTitle').textContent=title;renderAll(id);if(id==='bracketPage')setTimeout(()=>loadBracketReview($('bracketCategory')?.value||data.activeCategory||''),0)}
-function renderAll(){ensureIndividualAnyoEntries();renderDashboard();renderSetup();window.RADIUM_DRAW_LOTS?.refreshVisibility?.();renderTeamSelect();renderPlayers();renderTeams();renderCategories();renderCategorySelect();renderBracket();renderAnyo();renderAnyoEntryForm();renderQueue();renderMatchFlow();renderResults();renderReports()}
+function renderAll(){normalizeDataCollections();ensureIndividualAnyoEntries();normalizeDataCollections();renderDashboard();renderSetup();window.RADIUM_DRAW_LOTS?.refreshVisibility?.();renderTeamSelect();renderPlayers();renderTeams();renderCategories();renderCategorySelect();renderBracket();renderAnyo();renderAnyoEntryForm();renderQueue();renderMatchFlow();renderResults();renderReports()}
 document.querySelectorAll('.nav-item[data-page]').forEach(b=>b.onclick=()=>showPage(b.dataset.page));$('resetAllBtn').onclick=resetAllData; $('resetTournamentBtn')?.addEventListener('click',resetAllData);
 $('sidebarToggle')?.addEventListener('click',()=>document.querySelector('.sidebar')?.classList.toggle('open'));document.querySelectorAll('.sidebar .nav-item[data-page]').forEach(b=>b.addEventListener('click',()=>{if(window.innerWidth<=800)document.querySelector('.sidebar')?.classList.remove('open')}));$('fullscreenBtn')?.addEventListener('click',()=>document.documentElement.requestFullscreen?.());document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>showPage(b.dataset.go));
 function renderDashboard(){ $('dashTitle').textContent=data.setup.name||'NEW TOURNAMENT';$('dashMeta').textContent=[data.setup.date,data.setup.venue,data.setup.organizer].filter(Boolean).join(' • ')||'Online tournament control center';const brackets=data.categories.filter(c=>c&&c.bracket);const matches=brackets.flatMap(c=>{const b=c.bracket||{};if(b.mode==='single'){const count=Array.isArray(b.players)?b.players.length:(Array.isArray(b.rounds)?b.rounds.reduce((n,r)=>n+(Array.isArray(r)?r.length:0),0):0);return [...Array(Math.max(0,count>1?count-1:0))];}return Array.isArray(b.rounds)?b.rounds.flatMap(r=>Array.isArray(r)?r:[]):[];});const completed=data.results.filter(r=>r.finished).length;const active=matches.length-completed;$('dashStats').innerHTML=[['PLAYERS',data.players.length],['CATEGORIES',data.categories.length],['MATCHES',matches.length],['COMPLETED',completed]].map(x=>`<div class="stat"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('');$('liveCourts').innerHTML=Array.from({length:Number(data.setup.courts)||1},(_,i)=>{const m=data.results.find(r=>r.court===i+1&&!r.finished);return `<div class="activity-row"><b>COURT ${i+1}</b> — ${m?esc(m.blue)+' vs '+esc(m.red):'<span class="muted">AVAILABLE</span>'}</div>`}).join('');$('activity').innerHTML=data.audit.slice(0,7).map(a=>`<div class="activity-row"><b>${new Date(a.time).toLocaleTimeString()}</b> ${esc(a.action)} — ${esc(a.detail)}</div>`).join('')||'<div class="empty">No activity yet.</div>';const checks=[['Tournament setup',!!data.setup.name&&!!data.setup.date&&!!data.setup.venue,'setupPage'],['Teams',data.teams.length>0,'teamsPage'],['Players',data.players.length>0,'playersPage'],['Categories',data.categories.length>0,'categoriesPage'],['Brackets',data.categories.some(c=>c.bracket),'bracketPage']];$('setupChecklist').innerHTML=`<div class="section-header"><div><h3>TOURNAMENT CHECKLIST</h3><div class="muted">Complete these steps before competition.</div></div></div><div class="checklist">${checks.map(x=>`<button class="check-item ${x[1]?'done':''}" data-go="${x[2]}"><span class="check-icon">${x[1]?'✓':'○'}</span><span>${x[0]}</span><span class="check-action">${x[1]?'READY':'SET UP'}</span></button>`).join('')}</div>`;document.querySelectorAll('#setupChecklist [data-go]').forEach(b=>b.onclick=()=>showPage(b.dataset.go))}
@@ -389,11 +451,22 @@ async function renderPlayers(){
   const statusBadge=st=>`<span class="mode-badge status-${String(st||'ACTIVE').toLowerCase().replace(/_/g,'-')}">${esc(st||'ACTIVE')}</span>`;
   const rows=data.players.filter(p=>{const t=team(p.teamId)?.name||'';return [p.id,p.number,p.name,t].join(' ').toLowerCase().includes(q)}).map(p=>{
     const rs=byPlayer.get(String(p.id))||[];
-    const statusHtml=rs.length?rs.map(r=>{const c=cat(r.categoryId);const label=r._anyoEntry?`${c?.name||'ANYO'}${r._anyoType?' • '+r._anyoType:''}${r._anyoStyle?' • '+r._anyoStyle:''}${r._anyoWeapon?' • '+r._anyoWeapon:''}`:(c?.name||'Registration');return `<div>${statusBadge(r.status)} <small>${esc(label)}</small></div>`}).join(''):'<span class="muted">NO REGISTRATION RECORD</span>';
-    const cs=data.categories.filter(c=>eligible(p,c)).map(c=>c.name).join(', ')||'—';
+    const statusHtml=rs.length?rs.map(r=>statusBadge(r.status)).join(' '):'<span class="muted">NOT REGISTERED</span>';
+    // Show saved registrations, not merely categories the athlete is eligible for.
+    // The database rows above include direct Combative registrations and Anyo
+    // group-entry memberships resolved back to each participating athlete.
+    const registeredCategoryLabels=[...new Map(rs.map(r=>{
+      const c=cat(r.categoryId);
+      const isAnyo=!!r._anyoEntry||String(c?.event||'').toLowerCase().includes('anyo');
+      const details=isAnyo
+        ? [c?.name||'Anyo',r._anyoType||c?.anyoType||'',r._anyoStyle||c?.anyoStyle||'',r._anyoWeapon||c?.anyoWeapon||''].filter(Boolean).join(' • ')
+        : [c?.name||'Combative',c?.event||'',c?.weightFrom!=null&&c?.weightTo!=null?`${c.weightFrom}-${c.weightTo} kg`:''].filter(Boolean).join(' • ');
+      return [String(r.categoryId||r.anyo_entry_id||r.id),details];
+    }))].map(([key,label])=>label).filter(Boolean);
+    const cs=registeredCategoryLabels.length?registeredCategoryLabels.map(label=>`<div class="player-registered-category">${esc(label)}</div>`).join(''):'<span class="muted">NO EVENT REGISTRATIONS</span>';
     const att=attMap.get(String(p.teamId))||'EXPECTED';
     const action=readOnly?'<span class="muted">VIEW ONLY</span>':`<button class="btn small" onclick="editPlayer('${p.id}')">EDIT</button> <button class="btn small danger" onclick="deletePlayer('${p.id}')">DELETE</button>`;
-    return `<tr><td>${esc(p.number)}</td><td><b>${esc(p.name)}</b>${p.nick?'<br><small>'+esc(p.nick)+'</small>':''}</td><td>${esc(p.sex)}</td><td>${age(p.age ?? p.birth)}</td><td>${Number.isFinite(Number(p.weight))?Number(p.weight).toFixed(1)+' kg':'—'}</td><td>${esc(team(p.teamId)?.name||'—')}<br>${statusBadge(att)}</td><td>${statusHtml}</td><td>${esc(cs)}</td><td>${action}</td></tr>`;
+    return `<tr data-player-id="${esc(p.id)}"><td>${esc(p.number)}</td><td><b>${esc(p.name)}</b>${p.nick?'<br><small>'+esc(p.nick)+'</small>':''}</td><td>${esc(p.sex)}</td><td>${age(p.age ?? p.birth)}</td><td>${Number.isFinite(Number(p.weight))?Number(p.weight).toFixed(1)+' kg':'—'}</td><td>${esc(team(p.teamId)?.name||'—')}<br>${statusBadge(att)}</td><td>${statusHtml}</td><td>${esc(cs)}</td><td>${action}</td></tr>`;
   }).join('');
   $('playersTable').innerHTML=rows||'<tr><td colspan="9" class="empty">No players.</td></tr>';
 }
@@ -468,6 +541,7 @@ function consolidateDepEdPresetMatches(matches,groupLabel){
   return keep;
 }
 async function saveAndVerifyDepEdPreset(preset,expected,label){
+  normalizeDataCollections();
   renderAll();
   const cloud=window.RADIUM_CLOUD;
   if(!cloud?.saveNow)throw new Error('Cloud save service is unavailable. Reload RADIUM before applying presets.');
@@ -539,9 +613,11 @@ const DEPED_PEKAF_ANYO_SECONDARY=[
 async function addDepEdPEKAFAnyoPreset(level){
   if(data.locked)return alert('Unlock first');
   level=level==='Elementary'?'Elementary':'Secondary';
+  normalizeDataCollections();
   const source=level==='Elementary'?DEPED_PEKAF_ANYO_ELEMENTARY:DEPED_PEKAF_ANYO_SECONDARY;
+  if(!Array.isArray(source)||source.length===0)throw new Error(`The ${level} DepEd–PEKAF Anyo preset definition is unavailable.`);
   const preset=level==='Elementary'?'DEPED-PEKAF-ANYO-ELEMENTARY':'DEPED-PEKAF-ANYO-SECONDARY';
-  const ageFrom=level==='Elementary'?1:13,ageTo=level==='Elementary'?12:17;
+  const ageFrom=1,ageTo=level==='Elementary'?13:18;
   const norm=v=>String(v??'').trim().toLowerCase().replace(/[–—]/g,'-').replace(/\s+/g,' ');
   const normSex=v=>{const x=norm(v);if(['male','boy','boys','m'].includes(x))return'Male';if(['female','girl','girls','f'].includes(x))return'Female';if(['mixed','mix'].includes(x))return'Mixed';return String(v||'').trim()};
   const normType=v=>{const x=norm(v);if(x.includes('mixed'))return'Mixed';if(x.includes('synchron'))return'Synchronized';if(x.includes('individual'))return'Individual';return String(v||'').trim()};
@@ -629,6 +705,7 @@ function renderCategories(){
   const groups=[['Combative / Padded Stick',data.categories.filter(c=>c.event==='Padded Stick')],['Livestick',data.categories.filter(c=>c.event==='Livestick')],['Anyo — Traditional',data.categories.filter(c=>c.event==='Arnis Anyo'&&(c.anyoStyle||'Traditional')==='Traditional')],['Anyo — Non-Traditional',data.categories.filter(c=>c.event==='Arnis Anyo'&&c.anyoStyle==='Non-Traditional')]];
   $('categoriesList').innerHTML=groups.map(([title,items])=>`<div class="category-group"><div class="category-group-title"><h3>${esc(title)}</h3><span class="badge">${items.length} categories</span></div>${(window.RADIUM_SORT_CATEGORIES?window.RADIUM_SORT_CATEGORIES(items):items).map(c=>`<div class="category-row"><div><b>${esc(c.name)}</b><div class="muted">${sexLabel(c.sex)} • ${c.event}${c.event==='Arnis Anyo'&&c.anyoType?' • '+c.anyoType:''}${c.event==='Arnis Anyo'&&c.anyoStyle?' • '+c.anyoStyle:''}${c.anyoWeapon&&c.anyoWeapon!=='Any'?' • '+c.anyoWeapon:''} • ${c.ageFrom}-${c.ageTo} yrs • ${c.event==='Arnis Anyo'?'No weight limit':c.weightFrom+'-'+c.weightTo+' kg'} • ${isAnyoEvent(c)&&c.anyoType!=='Individual'?(data.anyoEntries||[]).filter(e=>e.categoryId===c.id&&e.status!=='deleted').length:data.players.filter(p=>eligible(p,c)).length} eligible • ${c.bracket?.locked?'BRACKET LOCKED':''}</div></div><div><button class="btn small" onclick="editCategory('${c.id}')">EDIT</button> <button class="btn small" onclick="openCategory('${c.id}')">OPEN</button> <button class="btn small danger" onclick="deleteCategory('${c.id}')">DELETE</button></div></div>`).join('')||'<div class="empty">No categories in this group.</div>'}</div>`).join('');
 }
+window.renderCategoriesList=renderCategories;
 window.editCategory=id=>{if(data.locked)return alert('Tournament is active and locked. Categories can no longer be edited.');const c=cat(id);$('catId').value=id;$('catName').value=c.name;$('catSex').value=c.sex;$('catEvent').value=c.event;$('catAnyoType').value=c.anyoType||'Individual';$('catAnyoStyle').value=c.anyoStyle||'Traditional';$('catAnyoWeapon').value=c.anyoWeapon||'Any';$('catAgeFrom').value=c.ageFrom;$('catAgeTo').value=c.ageTo;$('catWeightFrom').value=c.weightFrom;$('catWeightTo').value=c.weightTo;if($('catRegistrationFee'))$('catRegistrationFee').value=isFreeTournament()?0:(c.registrationFee??400);syncBillingUI();if($('catWeightRequirement'))$('catWeightRequirement').value=c.weightRequirement||'not_required';$('catDraw').value=c.draw;showPage('categoriesPage')};window.openCategory=id=>{const c=cat(id);if(!c)return alert('Category not found.');data.activeCategory=id;save();if(isAnyoEvent(c)){openAnyoCategoryDetail(id)}else{showPage('bracketPage')}};window.deleteCategory=async id=>{
   if(data.locked)return alert('Unlock first');
   const category=data.categories.find(c=>String(c.id)===String(id));if(!category)return alert('Category not found. Refresh categories and try again.');
@@ -671,111 +748,35 @@ $('bracketCategory').onchange=async e=>{data.activeCategory=e.target.value||null
 async function loadBracketReview(categoryId){
   const card=$('bracketReviewCard'),body=$('bracketReviewBody'),summary=$('bracketReviewSummary'),badge=$('bracketReviewBadge');
   if(!card||!body||!summary||!badge)return null;
-  const selectedId=String(categoryId||'').trim();
-  if(!selectedId){badge.textContent='SELECT A CATEGORY';summary.innerHTML='';body.innerHTML='<tr><td colspan="5" class="empty">Select a category to review players.</td></tr>';return null;}
-
+  if(!categoryId){badge.textContent='SELECT A CATEGORY';summary.innerHTML='';body.innerHTML='<tr><td colspan="5" class="empty">Select a category to review players.</td></tr>';return null;}
+  const c=cat(categoryId); if(!c||isAnyoEvent(c)){badge.textContent='NOT A COMBATIVE CATEGORY';body.innerHTML='<tr><td colspan="5" class="empty">Select a Combative category.</td></tr>';return null;}
   try{
     if(!window.RADIUM_DB)throw new Error('Supabase database bridge is unavailable.');
-    const init=await window.RADIUM_DB.init();
-    if(!init?.enabled)throw new Error('The tournament service is not connected.');
-    const tid=window.RADIUM_CLOUD?.getId?.()||activeTournamentId();
-    if(!tid)throw new Error('No tournament is selected.');
-
-    /*
-      V70 issue: the selector could contain a valid category while the local
-      data.categories array was still being refreshed. The old code called
-      cat(categoryId) before the cloud read and immediately returned
-      "NOT A COMBATIVE CATEGORY" when that local lookup missed.
-
-      For Player Review only, resolve the selected category by ID first and
-      use the cloud category as the source of truth. No records are changed.
-    */
-    let c=(Array.isArray(data.categories)?data.categories:[]).find(x=>String(x?.id)===selectedId)||null;
-    const categoryResult=await window.RADIUM_DB.select('categories',{
-      select:'id,tournament_id,name,event_type,gender,event_number,judges,preset,weight_required,bracket_by,age_min,age_max,weight_min,weight_max,division,style,weapon,scoring_type,rules,status',
-      eq:{id:selectedId,tournament_id:tid},
-      limit:1
-    });
-    if(categoryResult.error)throw categoryResult.error;
-    const dbCategory=categoryResult.data?.[0]||null;
-    if(dbCategory){
-      c={
-        ...(c||{}),
-        id:dbCategory.id,
-        name:dbCategory.name,
-        event:dbCategory.event_type==='Anyo'?'Arnis Anyo':(dbCategory.event_type==='Livestick'?'Livestick':'Padded Stick'),
-        event_type:dbCategory.event_type,
-        sex:dbCategory.gender||c?.sex||'Male',
-        eventNumber:dbCategory.event_number||c?.eventNumber||'',
-        judges:Number(dbCategory.judges)||Number(c?.judges)||5,
-        preset:dbCategory.preset||c?.preset||'',
-        ageFrom:Number(dbCategory.age_min),
-        ageTo:Number(dbCategory.age_max),
-        weightFrom:Number(dbCategory.weight_min),
-        weightTo:Number(dbCategory.weight_max),
-        weightRequired:!!dbCategory.weight_required,
-        bracketBy:dbCategory.bracket_by||null,
-        anyoType:dbCategory.division||c?.anyoType||'',
-        anyoStyle:dbCategory.style||c?.anyoStyle||'',
-        anyoWeapon:dbCategory.weapon||c?.anyoWeapon||'Any',
-        draw:dbCategory.rules?.draw||c?.draw||'random'
-      };
-    }
-
-    const eventType=String(c?.event_type||dbCategory?.event_type||'').trim().toLowerCase();
-    const eventName=String(c?.event||'').trim().toLowerCase();
-    const isAnyo=eventType==='anyo'||eventName==='arnis anyo';
-    const isLivestick=eventType==='livestick'||eventName==='livestick';
-    const isCombative=!isAnyo&&!isLivestick&&(eventType==='combative'||eventName==='padded stick'||eventName==='combative'||!!dbCategory);
-    if(!c||!isCombative){
-      badge.textContent='NOT A COMBATIVE CATEGORY';
-      summary.innerHTML='';
-      body.innerHTML='<tr><td colspan="5" class="empty">Select a Combative category.</td></tr>';
-      return null;
-    }
-
+    const init=await window.RADIUM_DB.init(); if(!init?.enabled)throw new Error('The tournament service is not connected.');
+    const tid=window.RADIUM_CLOUD?.getId?.(); if(!tid)throw new Error('No tournament is selected.');
     const [reg,pr,wi,cp,tm]=await Promise.all([
-      window.RADIUM_DB.select('category_registrations',{select:'player_id,status',eq:{tournament_id:tid,category_id:selectedId}}),
+      window.RADIUM_DB.select('category_registrations',{select:'player_id,status',eq:{tournament_id:tid,category_id:categoryId}}),
       window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status',eq:{tournament_id:tid}}),
-      window.RADIUM_DB.select('weigh_ins',{select:'player_id,weight,verified,verified_at',eq:{tournament_id:tid,category_id:selectedId}}),
-      window.RADIUM_DB.select('category_players',{select:'player_id,seed,draw_number,draw_type,drawn_at',eq:{category_id:selectedId}}),
+      window.RADIUM_DB.select('weigh_ins',{select:'player_id,weight,verified,verified_at',eq:{tournament_id:tid,category_id:categoryId}}),
+      window.RADIUM_DB.select('category_players',{select:'player_id,seed,draw_number,draw_type,drawn_at',eq:{category_id:categoryId}}),
       window.RADIUM_DB.select('teams',{select:'id,name',eq:{tournament_id:tid}})
     ]);
     for(const r of [reg,pr,wi,cp,tm])if(r.error)throw r.error;
-
-    let registeredIds=[...new Set((reg.data||[])
-      .filter(r=>!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase()))
-      .map(r=>String(r.player_id||'')).filter(Boolean))];
-
-    /* Local fallback is only for display if the cloud registration query is
-       temporarily empty. It does not create, update, or delete anything. */
-    if(!registeredIds.length&&Array.isArray(data.registrations)){
-      registeredIds=[...new Set(data.registrations
-        .filter(r=>String(r.categoryId??r.category_id)===selectedId&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase()))
-        .map(r=>String(r.playerId??r.player_id??'')).filter(Boolean))];
-    }
-
+    const registeredIds=[...new Set((reg.data||[]).filter(r=>!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase())).map(r=>String(r.player_id)).filter(Boolean))];
     const players=new Map((pr.data||[]).map(x=>[String(x.id),x]));
     const weigh=new Map((wi.data||[]).map(x=>[String(x.player_id),x]));
     const seeds=new Map((cp.data||[]).map(x=>[String(x.player_id),x]));
     const teams=new Map((tm.data||[]).map(x=>[String(x.id),x.name||'']));
-
-    const ageFrom=Number.isFinite(Number(c.ageFrom))?Number(c.ageFrom):Number(c.age_min??0);
-    const ageTo=Number.isFinite(Number(c.ageTo))?Number(c.ageTo):Number(c.age_max??99);
-    const weightFrom=Number.isFinite(Number(c.weightFrom))?Number(c.weightFrom):Number(c.weight_min??0);
-    const weightTo=Number.isFinite(Number(c.weightTo))?Number(c.weightTo):Number(c.weight_max??999);
-
     const rows=registeredIds.map(pid=>{
       const p=players.get(pid),w=weigh.get(pid),sr=seeds.get(pid);
       const weight=Number(w?.weight),ageNum=Number(p?.age);
-      const ageOk=Number.isFinite(ageNum)&&ageNum>=ageFrom&&ageNum<=ageTo;
+      const ageOk=Number.isFinite(ageNum)&&ageNum>=Number(c.ageFrom)&&ageNum<=Number(c.ageTo);
       const genderOk=!c.sex||c.sex==='Mixed'||c.sex===p?.gender;
       const combatOk=eCombat(p||{});
-      const weightOk=Number.isFinite(weight)&&weight>=weightFrom&&weight<=weightTo;
+      const weightOk=Number.isFinite(weight)&&weight>=Number(c.weightFrom)&&weight<=Number(c.weightTo);
       const verified=w?.verified===true&&ageOk&&genderOk&&combatOk&&weightOk;
       return {p,w,sr,verified,weight,team:teams.get(String(p?.team_id||''))||'—'};
     });
-
     const verifiedCount=rows.filter(x=>x.verified).length;
     const seededCount=rows.filter(x=>Number.isFinite(Number(x.sr?.seed))).length;
     badge.textContent=`${registeredIds.length} REGISTERED • ${verifiedCount} VERIFIED`;
@@ -787,9 +788,7 @@ async function loadBracketReview(categoryId){
       const wiText=x.verified?'✓ VERIFIED':(x.w?.verified===true?'⚠ VERIFIED BUT NOT CATEGORY-ELIGIBLE':'✗ NOT VERIFIED');
       return `<tr><td class="seed-cell">${seed}</td><td><b>${escLocal(name)}</b><div class="muted">${escLocal(x.p?.player_number||'')}</div></td><td>${escLocal(x.team)}</td><td class="weight-cell">${Number.isFinite(x.weight)?escLocal(x.weight.toFixed(2))+' kg':'—'}</td><td class="${x.verified?'verified':'not-verified'}">${wiText}</td></tr>`;
     }).join(''):'<tr><td colspan="5" class="empty">No registered players found for this category.</td></tr>';
-
-    const select=$('bracketCategory');
-    const opt=[...(select?.options||[])].find(o=>String(o.value)===selectedId);
+    const select=$('bracketCategory'),opt=select?.querySelector(`option[value="${CSS.escape(String(categoryId))}"]`);
     if(opt)opt.textContent=`${c.name} — ${registeredIds.length} registered • ${verifiedCount} verified`;
     return {registered:registeredIds.length,verified:verifiedCount,seeded:seededCount,rows};
   }catch(e){
@@ -879,6 +878,13 @@ function advance(b,r,mi,w,auto=false){
       const nm=round.find(x=>x.id===m.nextMatchId);
       if(nm){nm[m.nextSlot||'red']=w;return;}
     }
+  }
+  // Legacy brackets may lack nextMatchId. Infer the parent from adjacent
+  // round position rather than silently leaving the winner unadvanced.
+  const nextRound=b.rounds?.[r+1];
+  if(Array.isArray(nextRound)&&nextRound.length){
+    const parent=nextRound[Math.floor(mi/2)];
+    if(parent){parent[mi%2===0?'red':'blue']=w;m.nextMatchId=parent.id||null;m.nextSlot=mi%2===0?'red':'blue';}
   }
 }
 function autoByes(b){
@@ -1092,7 +1098,7 @@ function renderMatch(m,c,b,ri,mi,globalNo,gameNo){
   x.innerHTML=`<div class="match-label">${isFinal?'🏆 ':''}${esc(label)}</div><div class="match-card"><div class="fighter red ${m.winner===m.red?'winner':''} ${!m.red?'waiting':''}"><span>${nm(m.red)}</span>${scoreBox('red')}</div><div class="vs-badge">VS</div><div class="fighter blue ${m.winner===m.blue?'winner':''} ${!m.blue?'waiting':''}"><span>${nm(m.blue)}</span>${scoreBox('blue')}</div></div>`;
   const btn=document.createElement('button');btn.className='match-btn';
   if(m.completed){btn.textContent=m.winner?'RESULT CONFIRMED':'BYE ADVANCED';btn.disabled=true}
-  else if(m.red&&m.blue){btn.textContent='START MATCH';btn.onclick=()=>openScore(c.id,ri,mi)}
+  else if(m.red&&m.blue){btn.textContent='QUEUE ONLY';btn.disabled=true;btn.title='Start this match from Match Queue.'}
   else{btn.textContent='';btn.disabled=true;btn.classList.add('hidden-btn')}
   x.appendChild(btn);return x;
 }
@@ -1130,14 +1136,69 @@ function matchFlowOrderRows(rows,flow,getCategory){
   });
 }
 window.RADIUM_MATCH_FLOW_ORDER=matchFlowOrderRows;
+function isDepEdPekafQueue(){
+  const program=String(data.setup?.competitionProgram||'').trim().toUpperCase();
+  const type=String(data.setup?.tournamentType||data.setup?.competitionType||'').trim().toUpperCase();
+  return program==='DEPED_PEKAF' || type==='DEPED_PEKAF';
+}
+function isChampionshipFinalQueueRow(x){
+  const b=x?.c?.bracket;
+  // Finals-last only applies when the bracket has a distinct final round.
+  // A one-round category is not enough evidence to classify its first match as a final.
+  if(!b || String(b.mode||'').toLowerCase()==='roundrobin' || !Array.isArray(b.rounds) || b.rounds.length<2) return false;
+  return Number(x.ri)===b.rounds.length-1;
+}
 function orderedReadyMatches(rows){
   const flow=String(matchFlowDraft||data.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase();
-  const ready=(rows||[]).filter(x=>{const st=String(x.m?.status||'READY').toUpperCase();return x.m&&x.m.red&&x.m.blue&&!x.m.completed&&st==='READY';});
-  // Round-by-round flows are a true tournament execution gate, not merely a
-  // display sort. Do not release Round 2 while ANY playable Round 1 match is
-  // still unfinished, even if a later-category match is already READY.
+  const all=(rows||[]).filter(x=>x&&x.m);
+  const ready=all.filter(x=>{
+    const st=String(x.m?.status||'READY').toUpperCase();
+    return x.m&&x.m.red&&x.m.blue&&!x.m.completed&&st==='READY';
+  });
+
+  // DepEd–PEKAF scheduling rule: championship finals are the closing matches.
+  // Determine final status from bracket topology, not category labels or match names.
+  if(isDepEdPekafQueue()){
+    const isFinal=x=>isChampionshipFinalQueueRow(x);
+    const unfinishedNonFinal=all.filter(x=>
+      !x.m.completed && x.m.red && x.m.blue && !isFinal(x)
+    );
+
+    // Finals stay unavailable while any playable non-final remains unfinished.
+    let schedulable=ready;
+    if(unfinishedNonFinal.length){
+      schedulable=ready.filter(x=>!isFinal(x));
+
+      // Keep normal round progression for non-finals; do not release later rounds early.
+      if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){
+        const minRound=Math.min(...unfinishedNonFinal.map(x=>Number(x.ri)||0));
+        schedulable=schedulable.filter(x=>(Number(x.ri)||0)===minRound);
+      }
+      return matchFlowOrderRows(schedulable,flow,x=>x.c);
+    }
+
+    // All non-finals are complete: release eligible finals together, but retain
+    // the user's saved gender/category/round ordering among those finals.
+    return matchFlowOrderRows(ready.filter(isFinal),flow,x=>x.c);
+  }
+
+  // Combative queue: finish categories in the official weight order, from
+  // Pinweight through Half Lightweight. Within each category, preserve round
+  // progression so later rounds cannot appear before earlier rounds finish.
+  // This makes Half Lightweight the final category in the queue.
+  const rankOf=x=>matchFlowCategoryRank(x?.c||{});
+  const unfinished=all.filter(x=>!x.m.completed&&x.m.red&&x.m.blue);
+  const unfinishedCombative=unfinished.filter(x=>rankOf(x)>=0&&rankOf(x)<=4);
+  if(unfinishedCombative.length){
+    const activeRank=Math.min(...unfinishedCombative.map(rankOf));
+    const activeCategoryMatches=unfinishedCombative.filter(x=>rankOf(x)===activeRank);
+    const minRound=Math.min(...activeCategoryMatches.map(x=>Number(x.ri)||0));
+    const activeReady=ready.filter(x=>rankOf(x)===activeRank&&(Number(x.ri)||0)===minRound);
+    return matchFlowOrderRows(activeReady,flow,x=>x.c);
+  }
+
+  // Non-combative tournaments retain the existing round-by-round behavior.
   if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){
-    const unfinished=(rows||[]).filter(x=>x.m&&!x.m.completed&&x.m.red&&x.m.blue);
     if(!unfinished.length)return [];
     const minRound=Math.min(...unfinished.map(x=>Number(x.ri)||0));
     return matchFlowOrderRows(ready.filter(x=>(Number(x.ri)||0)===minRound),flow,x=>x.c);
@@ -1145,16 +1206,126 @@ function orderedReadyMatches(rows){
   return matchFlowOrderRows(ready,flow,x=>x.c);
 }
 function available(){return orderedReadyMatches(allMatches());}
-async function openScore(cid,ri,mi,court=1){const c=cat(cid),m=c?.bracket?.rounds?.[ri]?.[mi];if(!c||!m||!m.red||!m.blue||m.completed)return;const tid=activeTournamentId();if(!tid)return alert('No active tournament is selected.');let actualCourt=Number(court)||1;let matchFormat=String(m.matchFormat||'')==='single'?'single':(String(m.matchFormat||'')==='best3'?'best3':(Number(data.setup?.combativeRounds)===1?'single':'best3'));try{if(window.RADIUM_DB&&m.id){await window.RADIUM_DB.init();const existing=await window.RADIUM_DB.select('matches',{select:'id,court_id,match_format,status',eq:{id:m.id,tournament_id:tid},limit:1});if(existing.error)throw existing.error;const row=existing.data?.[0];if(row?.match_format)matchFormat=row.match_format;const cr=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,court_number:actualCourt},limit:1});if(cr.error)throw cr.error;if(cr.data?.[0]){actualCourt=Number(cr.data[0].court_number)||actualCourt;const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id,match_format:matchFormat},{id:m.id});if(ur.error)throw ur.error;m.court=actualCourt;m.matchFormat=matchFormat;}}}catch(e){return alert('Could not assign this match to Court '+actualCourt+'. '+(e.message||e))}const q=new URLSearchParams({court:String(actualCourt),tournament:tid,matchId:m.id,categoryId:cid,categoryName:c.name,event:c.event,round:String(ri+1),match:String(mi+1),red:m.red,blue:m.blue,redName:player(m.red)?.name||m.red,blueName:player(m.blue)?.name||m.blue,matchFormat});window.location.href='scoreboard/index.html?'+q.toString()}
-$('nextMatchBtn').onclick=async()=>{const a=available()[0];if(!a)return alert('No ready matches.');const court=await firstAvailableCourt();await openScore(a.c.id,a.ri,a.mi,court)};window.radiumStartQueuedMatch=async function(cid,ri,mi){const court=await firstAvailableCourt();await openScore(cid,ri,mi,court)};$('autoAssignBtn').onclick=async()=>{let i=0;const rows=available();const tid=activeTournamentId();for(const x of rows){const court=(i++%Math.max(1,Number(data.setup.courts)||1))+1;x.m.court=court;if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const cr=await window.RADIUM_DB.select('courts',{select:'id',eq:{tournament_id:tid,court_number:court},limit:1});if(cr.data?.[0]&&x.m.id){const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id},{id:x.m.id});if(ur.error)throw ur.error;}}catch(e){console.error('Court assignment save failed:',e);return alert('Court assignment could not be saved to Supabase. '+(e.message||e))}}}save();await renderQueue();toast('Matches assigned to courts and saved to Supabase')};async function firstAvailableCourt(){const count=Math.max(1,Number(data.setup.courts)||1);const tid=activeTournamentId();if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const courts=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,active:true}});const matches=await window.RADIUM_DB.select('matches',{select:'court_id,status',eq:{tournament_id:tid}});if(!courts.error&&!matches.error){const used=new Set((matches.data||[]).filter(m=>['IN_PROGRESS','READY'].includes(String(m.status||'').toUpperCase())&&m.court_id).map(m=>String(m.court_id)));for(const c of (courts.data||[]).sort((a,b)=>Number(a.court_number)-Number(b.court_number)))if(!used.has(String(c.id)))return Number(c.court_number)||1;}}catch(e){console.warn('Supabase court availability check failed:',e)}}const used=new Set(allMatches().map(x=>Number(x.court)||0));for(let i=1;i<=count;i++)if(!used.has(i))return i;return 1}
+function isTableOfficial(){return !!window.RADIUM_AUTH?.isOfficial?.();}
+async function assignedOfficialCourt(tid=activeTournamentId()){
+  if(!isTableOfficial())return null;
+  const userId=window.RADIUM_AUTH?.user?.id;
+  if(!tid||!userId||!window.RADIUM_DB)return null;
+  await window.RADIUM_DB.init();
+  const assignment=await window.RADIUM_DB.select('staff_court_assignments',{select:'court_id',eq:{tournament_id:tid,user_id:userId,active:true},limit:1});
+  if(assignment.error)throw assignment.error;
+  const courtId=assignment.data?.[0]?.court_id;
+  if(!courtId)return null;
+  const courts=await window.RADIUM_DB.select('courts',{select:'id,court_number,active',eq:{id:courtId,tournament_id:tid},limit:1});
+  if(courts.error)throw courts.error;
+  const court=courts.data?.[0];
+  if(!court||court.active===false)return null;
+  return {id:String(court.id),number:Number(court.court_number)||0};
+}
+async function queueReadyMatchesForOperator(assignedCourt=null){
+  const rows=available();
+  if(!isTableOfficial())return rows;
+  try{
+    const court=assignedCourt||await assignedOfficialCourt();
+    if(!court?.number)return [];
+    return rows.filter(x=>!x.m.court||Number(x.m.court)===court.number);
+  }catch(e){console.error('Assigned court queue could not be loaded:',e);return [];}
+}
+async function openScore(cid,ri,mi,court=1){
+  const c=cat(cid),m=c?.bracket?.rounds?.[ri]?.[mi];
+  if(!c||!m||!m.red||!m.blue||m.completed)return;
+  const tid=activeTournamentId();
+  if(!tid)return alert('No active tournament is selected.');
+  let actualCourt=Number(court)||1;
+  let matchFormat=String(m.matchFormat||'')==='single'?'single':(String(m.matchFormat||'')==='best3'?'best3':(Number(data.setup?.combativeRounds)===1?'single':'best3'));
+  let officialCourt=null;
+  try{
+    if(window.RADIUM_DB&&m.id){
+      await window.RADIUM_DB.init();
+      const existing=await window.RADIUM_DB.select('matches',{select:'id,court_id,match_format,status',eq:{id:m.id,tournament_id:tid},limit:1});
+      if(existing.error)throw existing.error;
+      const row=existing.data?.[0];
+      if(isTableOfficial()){
+        officialCourt=await assignedOfficialCourt(tid);
+        if(!officialCourt?.number) return alert('Your account has no active court assignment. Ask the tournament administrator to assign your court.');
+        actualCourt=officialCourt.number;
+        if(row?.court_id&&String(row.court_id)!==officialCourt.id) return alert('This match is assigned to another court. You can only start matches assigned to Court '+actualCourt+'.');
+        const running=await window.RADIUM_DB.select('matches',{select:'id,status',eq:{tournament_id:tid,court_id:officialCourt.id}});
+        if(running.error)throw running.error;
+        if((running.data||[]).some(x=>['LIVE','IN_PROGRESS'].includes(String(x.status||'').toUpperCase())&&String(x.id)!==String(m.id))) return alert('Court '+actualCourt+' already has a match in progress. Finish that match before starting another.');
+      }
+      if(['LIVE','IN_PROGRESS'].includes(String(row?.status||'').toUpperCase())) return alert('This match is already in progress. Return to its active scoreboard instead of starting it again.');
+      if(row?.match_format)matchFormat=row.match_format;
+      const cr=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,court_number:actualCourt},limit:1});
+      if(cr.error)throw cr.error;
+      if(cr.data?.[0]){
+        if(officialCourt&&String(cr.data[0].id)!==officialCourt.id) return alert('Court assignment validation failed. This match was not started.');
+        actualCourt=Number(cr.data[0].court_number)||actualCourt;
+        const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id,match_format:matchFormat},{id:m.id});
+        if(ur.error)throw ur.error;
+        m.court=actualCourt;m.matchFormat=matchFormat;
+      }else if(isTableOfficial()){
+        return alert('Your assigned court could not be verified. This match was not started.');
+      }
+    }else if(isTableOfficial()){
+      return alert('The tournament match could not be verified online. Reconnect and try again.');
+    }
+  }catch(e){return alert('Could not validate or assign this match to Court '+actualCourt+'. '+(e.message||e));}
+  const q=new URLSearchParams({court:String(actualCourt),tournament:tid,matchId:m.id,categoryId:cid,categoryName:c.name,event:c.event,round:String(ri+1),match:String(mi+1),red:m.red,blue:m.blue,redName:player(m.red)?.name||m.red,blueName:player(m.blue)?.name||m.blue,matchFormat,startSource:'queue'});
+  window.location.href='scoreboard/index.html?'+q.toString();
+}
+$('nextMatchBtn').onclick=async()=>{
+  const rows=await queueReadyMatchesForOperator();
+  const a=rows[0];
+  if(!a)return alert(isTableOfficial()?'No ready matches are assigned to your court. Check your court assignment or ask the manager.':'No ready matches.');
+  const court=await firstAvailableCourt();
+  if(!court)return alert(isTableOfficial()?'Your assigned court is unavailable or already has a match in progress.':'No available court.');
+  await openScore(a.c.id,a.ri,a.mi,court);
+};
+window.radiumStartQueuedMatch=async function(cid,ri,mi){
+  const rows=await queueReadyMatchesForOperator();
+  const target=rows.find(x=>String(x.c.id)===String(cid)&&Number(x.ri)===Number(ri)&&Number(x.mi)===Number(mi));
+  if(!target)return alert('This match is not available in your Match Queue or is assigned to another court.');
+  const court=await firstAvailableCourt();
+  if(!court)return alert(isTableOfficial()?'Your assigned court is unavailable or already has a match in progress.':'No available court.');
+  await openScore(cid,ri,mi,court);
+};
+$('autoAssignBtn').onclick=async()=>{let i=0;const rows=available();const tid=activeTournamentId();for(const x of rows){const court=(i++%Math.max(1,Number(data.setup.courts)||1))+1;x.m.court=court;if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const cr=await window.RADIUM_DB.select('courts',{select:'id',eq:{tournament_id:tid,court_number:court},limit:1});if(cr.data?.[0]&&x.m.id){const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id},{id:x.m.id});if(ur.error)throw ur.error;}}catch(e){console.error('Court assignment save failed:',e);return alert('Court assignment could not be saved to Supabase. '+(e.message||e))}}}save();await renderQueue();toast('Matches assigned to courts and saved to Supabase')};async function firstAvailableCourt(){
+  const count=Math.max(1,Number(data.setup.courts)||1),tid=activeTournamentId();
+  if(isTableOfficial()){
+    try{
+      const assigned=await assignedOfficialCourt(tid);
+      if(!assigned?.number)return 0;
+      const matches=await window.RADIUM_DB.select('matches',{select:'id,status',eq:{tournament_id:tid,court_id:assigned.id}});
+      if(matches.error)throw matches.error;
+      if((matches.data||[]).some(m=>['LIVE','IN_PROGRESS'].includes(String(m.status||'').toUpperCase())))return 0;
+      return assigned.number;
+    }catch(e){console.warn('Assigned court availability check failed:',e);return 0;}
+  }
+  if(tid&&window.RADIUM_DB){
+    try{
+      await window.RADIUM_DB.init();
+      const courts=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,active:true}});
+      const matches=await window.RADIUM_DB.select('matches',{select:'court_id,status',eq:{tournament_id:tid}});
+      if(!courts.error&&!matches.error){
+        const used=new Set((matches.data||[]).filter(m=>['LIVE','IN_PROGRESS'].includes(String(m.status||'').toUpperCase())&&m.court_id).map(m=>String(m.court_id)));
+        for(const c of (courts.data||[]).sort((a,b)=>Number(a.court_number)-Number(b.court_number)))if(!used.has(String(c.id)))return Number(c.court_number)||1;
+      }
+    }catch(e){console.warn('Supabase court availability check failed:',e);}
+  }
+  const used=new Set(allMatches().filter(x=>String(x.m?.status||'READY').toUpperCase()==='IN_PROGRESS').map(x=>Number(x.m.court)||0));
+  for(let i=1;i<=count;i++)if(!used.has(i))return i;
+  return 1;
+}
+
 async function renderQueue(){
   const courts=$('courts');
   let liveByCourt=new Map();
   const tid=activeTournamentId();
-  if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const q=await window.RADIUM_DB.select('matches',{select:'id,court_id,category_id,round,match_number,blue_player_id,red_player_id,status,metadata',eq:{tournament_id:tid}});if(!q.error){const cats=new Map(data.categories.map(c=>[String(c.id),c]));const players=new Map(data.players.map(p=>[String(p.id),p]));const courtRows=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid}});const noById=new Map((courtRows.data||[]).map(c=>[String(c.id),Number(c.court_number)]));(q.data||[]).filter(m=>String(m.status||'').toUpperCase()==='IN_PROGRESS'&&m.court_id).forEach(m=>{const cno=noById.get(String(m.court_id));if(!cno)return;const c=cats.get(String(m.category_id));liveByCourt.set(cno,{blueName:players.get(String(m.blue_player_id))?.name||m.blue_player_id,redName:players.get(String(m.red_player_id))?.name||m.red_player_id,categoryName:c?.name||''})});}}catch(e){console.warn('Supabase live court load failed:',e)}}
+  if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const q=await window.RADIUM_DB.select('matches',{select:'id,court_id,category_id,round,match_number,blue_player_id,red_player_id,status,metadata',eq:{tournament_id:tid}});if(!q.error){const cats=new Map(data.categories.map(c=>[String(c.id),c]));const players=new Map(data.players.map(p=>[String(p.id),p]));const courtRows=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid}});const noById=new Map((courtRows.data||[]).map(c=>[String(c.id),Number(c.court_number)]));(q.data||[]).filter(m=>['LIVE','IN_PROGRESS'].includes(String(m.status||'').toUpperCase())&&m.court_id).forEach(m=>{const cno=noById.get(String(m.court_id));if(!cno)return;const c=cats.get(String(m.category_id));liveByCourt.set(cno,{blueName:players.get(String(m.blue_player_id))?.name||m.blue_player_id,redName:players.get(String(m.red_player_id))?.name||m.red_player_id,categoryName:c?.name||''})});}}catch(e){console.warn('Supabase live court load failed:',e)}}
   courts.innerHTML=Array.from({length:data.setup.courts},(_,i)=>{const cno=i+1,live=liveByCourt.get(cno);return `<div class="court ${live?'live':''}"><h3>COURT ${cno} ${live?'<span class="live-dot">● LIVE</span>':''}</h3>${live?`<div><b>${esc(live.blueName)}</b> vs <b>${esc(live.redName)}</b></div><div class="muted">${esc(live.categoryName)}</div>`:'<div class="muted">AVAILABLE</div>'}</div>`}).join('');
-  const rows=available().slice(0,20);
-  $('upcomingMatches').innerHTML=rows.length?`<div class="queue-match-list">${rows.map((x,i)=>{const red=player(x.m.red)?.name||x.m.red||'TBD',blue=player(x.m.blue)?.name||x.m.blue||'TBD';return `<div class="queue-match ${i===0?'next':''}"><div class="queue-match-num">${i===0?'NEXT':'#'+(i+1)}</div><div class="queue-match-category">${esc(x.c.name)}<small>ROUND ${x.ri+1} • MATCH ${x.mi+1}</small></div><div class="queue-match-players">${esc(red)} <span class="muted">VS</span> ${esc(blue)}</div><button class="btn small primary" onclick="window.radiumStartQueuedMatch('${x.c.id}',${x.ri},${x.mi})">START</button></div>`}).join('')}</div>`:'<div class="empty">No ready matches.</div>';
+  const rows=(await queueReadyMatchesForOperator()).slice(0,20);
+  $('upcomingMatches').innerHTML=rows.length?`<div class="queue-match-list">${rows.map((x,i)=>{const red=player(x.m.red)?.name||x.m.red||'TBD',blue=player(x.m.blue)?.name||x.m.blue||'TBD';return `<div class="queue-match ${i===0?'next':''}"><div class="queue-match-num">${i===0?'NEXT':'#'+(i+1)}</div><div class="queue-match-category">${esc(x.c.name)}<small>ROUND ${x.ri+1} • MATCH ${x.mi+1}</small></div><div class="queue-match-players">${esc(red)} <span class="muted">VS</span> ${esc(blue)}</div><button class="btn small primary" onclick="window.radiumStartQueuedMatch('${x.c.id}',${x.ri},${x.mi})">START</button></div>`}).join('')}</div>`:`<div class="empty">${isTableOfficial()?'No ready matches are assigned to your court. Verify your active court assignment.':'No ready matches.'}</div>`;
 }
 
 function awardMedal(categoryId,playerId,medal){
@@ -1165,14 +1336,33 @@ function awardMedal(categoryId,playerId,medal){
 async function processResultPayload(r){
   if(!r)return false;
   try{
-    // Refresh first so validation and display use the same authoritative Supabase state.
+    // Refresh first so validation uses the latest cloud participants and match state.
     const ok=await window.RADIUM_CLOUD?.pull?.();
     if(ok===false)return false;
-    const c=cat(r.categoryId),m=c?.bracket?.rounds?.[Number(r.round)-1]?.[Number(r.match)-1];
-    if(!c||!m||!r.winner||(m.red!==r.winner&&m.blue!==r.winner))return false;
+    const roundIndex=Number(r.round)-1,matchIndex=Number(r.match)-1;
+    const c=cat(r.categoryId),b=c?.bracket,m=b?.rounds?.[roundIndex]?.[matchIndex];
+    if(!c||!b||!m||!r.winner||(String(m.red)!==String(r.winner)&&String(m.blue)!==String(r.winner)))return false;
+
+    // The scoreboard saves the official result in Supabase, but a cloud refresh
+    // alone does not move the winner inside the saved category bracket. Apply the
+    // advancement here for every category/round, including semifinal -> final.
+    // Reapplying the same result is safe: it writes the same winner into the same slot.
+    m.winner=r.winner;
+    m.completed=true;
+    if(r.blueScore!=null)m.blueScore=Number(r.blueScore)||0;
+    if(r.redScore!=null)m.redScore=Number(r.redScore)||0;
+    if(r.completedAt||r.time)m.completedAt=r.completedAt||r.time;
+    if(r.roundScores)m.roundScores=r.roundScores;
+    if(b.mode!=='roundrobin')advance(b,roundIndex,matchIndex,r.winner);
+    if(Array.isArray(data.results)){
+      const existing=data.results.find(x=>String(x.categoryId)===String(c.id)&&Number(x.round)===Number(r.round)&&Number(x.match)===Number(r.match));
+      const resultRow={...r,categoryId:c.id,category:c.name||r.categoryName||r.category||'',winner:r.winner};
+      if(existing)Object.assign(existing,resultRow);else data.results.push(resultRow);
+    }
+    save();
     renderAll();
     return true;
-  }catch(e){console.error('RADIUM result refresh failed:',e);return false;}
+  }catch(e){console.error('RADIUM result refresh/advancement failed:',e);return false;}
 }
 async function processOneResult(rawKey){const r=window[rawKey];return r?processResultPayload(r):false}
 async function processResult(){return window.__RADIUM_PENDING_RESULT_PROMISE||true}
@@ -1436,39 +1626,10 @@ if(mockBtn){mockBtn.type='button';mockBtn.onclick=e=>{e.preventDefault();e.stopP
 load();
 window.__RADIUM_GET_DATA=function(){return data};
 window.RADIUM_STATE=()=>data;
-window.__RADIUM_SET_DATA=function(next,opts={}){if(!next||typeof next!=='object')return false;const incomingSetup={...(next.setup||{})};if(!incomingSetup.competitionProgram)incomingSetup.competitionProgram='GENERAL';data={...createFreshData(),...next,version:16,setup:{...createFreshData().setup,...incomingSetup},anyoResults:Array.isArray(next.anyoResults)?next.anyoResults:[],weighIns:next.weighIns&&typeof next.weighIns==='object'?next.weighIns:{},anyoEntries:Array.isArray(next.anyoEntries)?next.anyoEntries:[]};normalizeBracketPlayerIds();if(!opts.fromCloud)save();window.RADIUM_DRAW_LOTS?.refreshVisibility?.();return true};
+window.__RADIUM_SET_DATA=function(next,opts={}){if(!next||typeof next!=='object')return false;const incomingSetup={...(next.setup||{})};if(!incomingSetup.competitionProgram)incomingSetup.competitionProgram='GENERAL';data={...createFreshData(),...next,version:16,setup:{...createFreshData().setup,...incomingSetup},teams:Array.isArray(next.teams)?next.teams:[],players:Array.isArray(next.players)?next.players:[],categories:Array.isArray(next.categories)?next.categories:[],registrations:Array.isArray(next.registrations)?next.registrations:[],categoryPlayers:Array.isArray(next.categoryPlayers)?next.categoryPlayers:[],results:Array.isArray(next.results)?next.results:[],medals:Array.isArray(next.medals)?next.medals:[],audit:Array.isArray(next.audit)?next.audit:[],anyoResults:Array.isArray(next.anyoResults)?next.anyoResults:[],weighIns:next.weighIns&&typeof next.weighIns==='object'&&!Array.isArray(next.weighIns)?next.weighIns:{},anyoEntries:Array.isArray(next.anyoEntries)?next.anyoEntries:[]};normalizeBracketPlayerIds();if(!opts.fromCloud)save();window.RADIUM_DRAW_LOTS?.refreshVisibility?.();return true};
 window.renderAll=renderAll;
 window.RADIUM_MAIN_READY=true;rebuildAnyoMedals();syncCategoryFields();togglePlayerAnyoWeapon();if(data.locked)document.body.classList.add('locked');renderAll();const __initialParams=new URLSearchParams(location.search);const initialView=__initialParams.get('view');
 if(initialView==='bracket')showPage('bracketPage');
 else if(initialView==='anyo')showPage('anyoPage');
-else if(initialView==='queue'){
-  showPage('queuePage');
-  // Coming back from the scoreboard after a single-round match: show what
-  // just happened to the bracket, then jump straight into the next ready
-  // match instead of silently landing on the Match Queue page.
-  if(__initialParams.get('autostart')==='1'){
-    const a=available()[0];
-    if(a){
-      const last=data.results[0];
-      let msg='Loading next match…';
-      if(last){
-        const c=cat(last.categoryId),b=c?.bracket,winnerName=player(last.winner)?.name||last.winner;
-        if(b){
-          msg=(b.champion===last.winner)
-            ?`${winnerName} is the CHAMPION of ${c.name}! Loading next match…`
-            :`${winnerName} advances to ${roundName(Number(last.round)+1,b.rounds.length)} — ${c.name}. Loading next match…`;
-        }
-      }
-      toast(msg);
-      const preferredCourt=Number(__initialParams.get('court'))||0;
-      setTimeout(async()=>{
-        let court=await firstAvailableCourt();
-        if(preferredCourt&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const cr=await window.RADIUM_DB.select('courts',{select:'id',eq:{tournament_id:activeTournamentId(),court_number:preferredCourt},limit:1});const cid=cr.data?.[0]?.id;if(cid){const mr=await window.RADIUM_DB.select('matches',{select:'id,status',eq:{tournament_id:activeTournamentId(),court_id:cid}});const busy=(mr.data||[]).some(m=>['IN_PROGRESS','READY'].includes(String(m.status||'').toUpperCase()));if(!busy)court=preferredCourt;}}catch(e){console.warn('Preferred court check failed:',e)}}
-        await openScore(a.c.id,a.ri,a.mi,court);
-      },1400);
-    }else{
-      toast('No more ready matches in this bracket.');
-    }
-  }
-}
+else if(initialView==='queue'){showPage('queuePage');}
 

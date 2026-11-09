@@ -30,7 +30,7 @@
   }
   function weaponRank(c){return ({'Single Weapon':1,'Double Weapon':2,'Espada y Daga':3,'Espada y Saga':3})[String(c?.weapon||'')]||99;}
   function sortedCategories(list){return [...list].sort((a,b)=>{const da=categoryDivision(a),db=categoryDivision(b);if(da!==db)return da==='Elementary'?-1:1;const wa=weaponRank(a),wb=weaponRank(b);if(wa!==wb)return wa-wb;return String(a.name||'').localeCompare(String(b.name||''));});}
-  function selected(){const d=state();return d?.categories?.find(c=>String(c.id)===String($('drawLotsCategory')?.value))||null;}
+  function selected(){const d=state();const raw=$('drawLotsCategory')?.value;if(raw==null||raw==='')return null;const id=String(raw).trim();const pool=[...(d?.categories||[]),...categories()];return pool.find(c=>String(c?.id??'').trim()===id)||null;}
   function teamName(id){const d=state();return d?.teams?.find(t=>String(t.id)===String(id))?.name||'—';}
   function anyoAgeOK(p,c){
     const a=Number(p?.age);if(!Number.isFinite(a))return false;
@@ -228,18 +228,32 @@
       const d=state();if(!d)return false;
       const players=new Map((pr.data||[]).map(p=>[String(p.id),p]));
       const localPlayers=d.players||[];
-      for(const p of localPlayers){
-        const cp=players.get(String(p.id));if(!cp)continue;
-        if(cp.events&&typeof cp.events==='object'&&Object.keys(cp.events).length)p.events={...p.events,...cp.events};
-        if(cp.team_id)p.teamId=cp.team_id;
-        if(cp.age!=null)p.age=Number(cp.age)||p.age;
-        if(cp.gender)p.sex=cp.gender;
+      const localById=new Map(localPlayers.map(p=>[String(p.id),p]));
+      for(const cp of (pr.data||[])){
+        let p=localById.get(String(cp.id));
+        if(!p){
+          p={id:cp.id,name:[cp.first_name,cp.middle_name,cp.last_name].filter(Boolean).join(' ').trim()||cp.player_number||String(cp.id),number:cp.player_number||'',teamId:cp.team_id||'',age:cp.age==null?null:Number(cp.age),sex:cp.gender||'',weight:cp.weight==null?null:Number(cp.weight),events:cp.events&&typeof cp.events==='object'?cp.events:{},categorySeeds:{}};
+          localPlayers.push(p);localById.set(String(p.id),p);
+        }else{
+          if(cp.events&&typeof cp.events==='object'&&Object.keys(cp.events).length)p.events={...(p.events||{}),...cp.events};
+          if(cp.team_id)p.teamId=cp.team_id;
+          if(cp.age!=null)p.age=Number(cp.age)||p.age;
+          if(cp.gender)p.sex=cp.gender;
+          if(cp.weight!=null)p.weight=Number(cp.weight)||p.weight;
+          if(cp.player_number&&!p.number)p.number=cp.player_number;
+          if(!p.name)p.name=[cp.first_name,cp.middle_name,cp.last_name].filter(Boolean).join(' ').trim();
+        }
       }
+      d.players=localPlayers;
       const membersByEntry=new Map();
       for(const m of mr.data||[]){const k=String(m.entry_id);if(!membersByEntry.has(k))membersByEntry.set(k,[]);membersByEntry.get(k).push(m);}
       const cloudEntries=(er.data||[]).filter(e=>!['DELETED','WITHDRAWN','CANCELLED'].includes(String(e.status||'').toUpperCase())).map(e=>({
         id:e.id,number:e.entry_number||e.id,type:e.entry_type||'Individual',categoryId:e.category_id,style:e.style||c.anyoStyle||'Traditional',weapon:e.weapon||c.anyoWeapon||'Any',groupReference:e.group_reference||'',memberIds:(membersByEntry.get(String(e.id))||[]).sort((a,b)=>Number(a.member_position||0)-Number(b.member_position||0)).map(m=>m.player_id),drawOrder:Number.isFinite(Number(e.draw_order))?Number(e.draw_order):null,drawType:e.draw_type||null,drawnAt:e.drawn_at||null,status:String(e.status||'active').toLowerCase()}));
-      const regPlayers=(rr.data||[]).filter(r=>r.player_id&&!['CANCELLED','DELETED','WITHDRAWN'].includes(String(r.status||'').toUpperCase())).map(r=>String(r.player_id));
+      const activeCategoryRegs=(rr.data||[]).filter(r=>!['CANCELLED','DELETED','WITHDRAWN','NO_SHOW'].includes(String(r.status||'ACTIVE').toUpperCase()));
+      const unlinkedCount=activeCategoryRegs.filter(r=>!r.player_id&&!r.anyo_entry_id).length;
+      const danglingEntryCount=activeCategoryRegs.filter(r=>r.anyo_entry_id&&!(er.data||[]).some(e=>String(e.id)===String(r.anyo_entry_id))).length;
+      d.anyoRegistrationDiagnostics={categoryId:String(c.id),unlinkedCount,danglingEntryCount};
+      const regPlayers=activeCategoryRegs.filter(r=>r.player_id||r.playerId).map(r=>String(r.player_id||r.playerId));
       // Build missing Individual entries from the authoritative category registration.
       // This repairs the common case where category_registrations was saved before
       // anyo_entries was created. It never guesses a player for an orphan row whose
@@ -266,17 +280,65 @@
       return true;
     }catch(e){console.warn('Anyo cloud roster hydration failed:',e);return false;}
   }
+  // Load the selected Combative category directly from Supabase instead of relying
+  // on a possibly stale application snapshot. Reuse in-flight requests to avoid
+  // repeated queries when the screen re-renders.
+  const combativeHydrationInFlight=new Map();
+  const combativeHydrationDone=new Map();
+  async function hydrateCombativeRosterFromCloud(c, force=false){
+    if(!c||isAnyo(c)||!window.RADIUM_DB)return false;
+    const tid=String(window.RADIUM_CLOUD?.getId?.()||state()?.tournamentId||'');
+    if(!tid)return false;
+    const key=tid+'|'+String(c.id);
+    if(!force&&Date.now()-(combativeHydrationDone.get(key)||0)<5000)return false;
+    if(combativeHydrationInFlight.has(key))return combativeHydrationInFlight.get(key);
+    const job=(async()=>{
+      const init=await window.RADIUM_DB.init();
+      if(!init?.enabled)return false;
+      const [rr,pr,wr,cr]=await Promise.all([
+        window.RADIUM_DB.select('category_registrations',{select:'id,tournament_id,category_id,player_id,anyo_entry_id,team_id,status',eq:{tournament_id:tid,category_id:c.id}}),
+        window.RADIUM_DB.select('players',{select:'id,tournament_id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status,events',eq:{tournament_id:tid}}),
+        window.RADIUM_DB.select('weigh_ins',{select:'tournament_id,category_id,player_id,weight,verified',eq:{tournament_id:tid,category_id:c.id}}),
+        window.RADIUM_DB.select('category_players',{select:'category_id,player_id,seed,draw_number,status',eq:{category_id:c.id}})
+      ]);
+      if(rr?.error||pr?.error||wr?.error||cr?.error)throw rr?.error||pr?.error||wr?.error||cr?.error;
+      const d=state();if(!d)return false;
+      const local=[...(d.players||[])];
+      const byId=new Map(local.map(p=>[String(p.id),p]));
+      for(const cp of (pr.data||[])){
+        let p=byId.get(String(cp.id));
+        const name=[cp.first_name,cp.middle_name,cp.last_name].filter(Boolean).join(' ').trim()||cp.player_number||String(cp.id);
+        if(!p){p={id:cp.id,name,number:cp.player_number||'',teamId:cp.team_id||'',age:cp.age==null?null:Number(cp.age),sex:cp.gender||'',gender:cp.gender||'',weight:cp.weight==null?null:Number(cp.weight),events:cp.events&&typeof cp.events==='object'?cp.events:{},categorySeeds:{}};local.push(p);byId.set(String(p.id),p);}
+        else {p.name=p.name||name;p.teamId=cp.team_id||p.teamId||'';p.age=cp.age==null?p.age:Number(cp.age);p.sex=cp.gender||p.sex||'';p.gender=cp.gender||p.gender||'';p.weight=cp.weight==null?p.weight:Number(cp.weight);p.number=p.number||cp.player_number||'';}
+      }
+      const active=(rr.data||[]).filter(r=>!['CANCELLED','DELETED','WITHDRAWN','NO_SHOW','NO SHOW'].includes(String(r.status||'ACTIVE').toUpperCase()));
+      const seeds=new Map((cr.data||[]).map(x=>[String(x.player_id),x]));
+      for(const p of local){const row=seeds.get(String(p.id));if(row){p.categorySeeds=p.categorySeeds||{};p.categorySeeds[c.id]={...(p.categorySeeds[c.id]||{}),seed:row.seed,drawNumber:row.draw_number};}}
+      const regs=active.map(r=>({id:r.id,tournamentId:r.tournament_id,categoryId:r.category_id,playerId:r.player_id||'',anyoEntryId:r.anyo_entry_id||null,teamId:r.team_id||'',status:String(r.status||'ACTIVE').toUpperCase()}));
+      const otherRegs=(d.registrations||[]).filter(r=>String(r.categoryId??r.category_id)!==String(c.id));
+      const weighIns={...(d.weighIns||{})};
+      for(const w of wr.data||[])weighIns[String(w.category_id)+'|'+String(w.player_id)]={weight:Number(w.weight),verified:w.verified===true};
+      d.players=local;d.registrations=[...otherRegs,...regs];d.weighIns=weighIns;
+      window.__RADIUM_SET_DATA?.(d);
+      combativeHydrationDone.set(key,Date.now());
+      return true;
+    })().catch(e=>{console.warn('Combative cloud roster hydration failed:',e);return false;}).finally(()=>combativeHydrationInFlight.delete(key));
+    combativeHydrationInFlight.set(key,job);
+    return job;
+  }
   function renderSelected(options={}){
-    const c=selected(),info=$('drawLotsInfo'),tb=$('drawLotsTable'),status=$('drawLotsStatus');
+    const c=selected(),d=state(),info=$('drawLotsInfo'),tb=$('drawLotsTable'),status=$('drawLotsStatus');
     if(!c){if(info)info.innerHTML='<strong>Select a category.</strong> The Tournament Manager records the physical draw result here.';if(tb)tb.innerHTML='<tr><td colspan="5" class="draw-lots-empty">No category selected.</td></tr>';if(status)status.textContent='NOT DRAWN';return;}
     const list=competitors(c),any=isAnyo(c),type=any?(c.anyoType||'Individual'):'Combative';
-    if(any&&!options.skipCloudHydrate){
-      hydrateAnyoRosterFromCloud(c).then(changed=>{
+    if(!options.skipCloudHydrate){
+      const hydrate=any?hydrateAnyoRosterFromCloud(c):hydrateCombativeRosterFromCloud(c);
+      hydrate.then(changed=>{
         if(changed&&selected()&&String(selected().id)===String(c.id))renderSelected({skipCloudHydrate:true});
       });
     }
     if(!options.skipHydrate)hydrateSavedDraw(c,list);
-    if(info)info.innerHTML=any?`<strong>DepEd Anyo:</strong> Coaches physically draw numbered papers. Enter each drawn number for <b>${esc(c.name)}</b>. The order is independent for this category.`:`<strong>DepEd Combative:</strong> Coaches physically draw seed numbers for <b>${esc(c.name)}</b>. Enter each drawn seed below; the bracket will use these category-specific seeds.`;
+    const diag=d.anyoRegistrationDiagnostics&&String(d.anyoRegistrationDiagnostics.categoryId)===String(c.id)?d.anyoRegistrationDiagnostics:null;
+    if(info)info.innerHTML=any?`<strong>DepEd Anyo:</strong> Coaches physically draw numbered papers. Enter each drawn number for <b>${esc(c.name)}</b>. The order is independent for this category.${diag&&(diag.unlinkedCount||diag.danglingEntryCount)?`<div class="draw-lots-warning" role="alert"><b>DATABASE REGISTRATION ISSUE:</b> ${diag.unlinkedCount} active registration(s) have no linked athlete or Anyo entry; ${diag.danglingEntryCount} registration(s) reference missing entries. These cannot safely be included in draw lots until the original registration data is restored. Do not assign numbers to unidentified registrations.</div>`:''}`:`<strong>DepEd Combative:</strong> Coaches physically draw seed numbers for <b>${esc(c.name)}</b>. Enter each drawn seed below; the bracket will use these category-specific seeds.`;
     const drawn=list.length>0&&list.every(x=>Number.isInteger(x.draw)&&x.draw>=1&&x.draw<=list.length)&&new Set(list.map(x=>x.draw)).size===list.length;
     if(status)status.textContent=drawn?'DRAW COMPLETE':'ENTER DRAW';
     const rows=[...list].sort((a,b)=>{const ad=Number(a.draw),bd=Number(b.draw);if(Number.isFinite(ad)&&Number.isFinite(bd))return ad-bd; if(Number.isFinite(ad))return -1;if(Number.isFinite(bd))return 1;return a.name.localeCompare(b.name);});
