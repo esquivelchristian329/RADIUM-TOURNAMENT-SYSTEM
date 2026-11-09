@@ -862,6 +862,13 @@ function advance(b,r,mi,w,auto=false){
       if(nm){nm[m.nextSlot||'red']=w;return;}
     }
   }
+  // Legacy brackets may lack nextMatchId. Infer the parent from adjacent
+  // round position rather than silently leaving the winner unadvanced.
+  const nextRound=b.rounds?.[r+1];
+  if(Array.isArray(nextRound)&&nextRound.length){
+    const parent=nextRound[Math.floor(mi/2)];
+    if(parent){parent[mi%2===0?'red':'blue']=w;m.nextMatchId=parent.id||null;m.nextSlot=mi%2===0?'red':'blue';}
+  }
 }
 function autoByes(b){
   // Compatibility hook for older saved brackets. New brackets do not create
@@ -1074,7 +1081,7 @@ function renderMatch(m,c,b,ri,mi,globalNo,gameNo){
   x.innerHTML=`<div class="match-label">${isFinal?'🏆 ':''}${esc(label)}</div><div class="match-card"><div class="fighter red ${m.winner===m.red?'winner':''} ${!m.red?'waiting':''}"><span>${nm(m.red)}</span>${scoreBox('red')}</div><div class="vs-badge">VS</div><div class="fighter blue ${m.winner===m.blue?'winner':''} ${!m.blue?'waiting':''}"><span>${nm(m.blue)}</span>${scoreBox('blue')}</div></div>`;
   const btn=document.createElement('button');btn.className='match-btn';
   if(m.completed){btn.textContent=m.winner?'RESULT CONFIRMED':'BYE ADVANCED';btn.disabled=true}
-  else if(m.red&&m.blue){btn.textContent='START MATCH';btn.onclick=()=>openScore(c.id,ri,mi)}
+  else if(m.red&&m.blue){btn.textContent='QUEUE ONLY';btn.disabled=true;btn.title='Start this match from Match Queue.'}
   else{btn.textContent='';btn.disabled=true;btn.classList.add('hidden-btn')}
   x.appendChild(btn);return x;
 }
@@ -1088,7 +1095,7 @@ function matchFlowCategoryRank(c){
   if(/\bbantamweight\b|\bbantam\b/.test(n))return 1;
   if(/\bfeatherweight\b|\bfeather\b/.test(n))return 2;
   if(/\bextra\s*lightweight\b|\bextra\s*light\s*weight\b/.test(n))return 3;
-  if(/\bhalf\s*lightweight\b|\bhalf\s*light\s*weight\b/.test(n))return 4;
+  if(/\bhalf\s*lightweight\b|\bhalf\s*light\s*weight\b|\bhalf\s*light\b|\bhalflightweight\b/.test(n))return 4;
   // Anyo order. This is also used by category-based selectors/queues.
   if(/\bespada\s*y\s*daga\b/.test(n))return 12;
   if(/\bdouble\s+weapon\b/.test(n))return 11;
@@ -1112,14 +1119,88 @@ function matchFlowOrderRows(rows,flow,getCategory){
   });
 }
 window.RADIUM_MATCH_FLOW_ORDER=matchFlowOrderRows;
+function isDepEdPekafQueue(){
+  const program=String(data.setup?.competitionProgram||'').trim().toUpperCase();
+  const type=String(data.setup?.tournamentType||data.setup?.competitionType||'').trim().toUpperCase();
+  return program==='DEPED_PEKAF' || type==='DEPED_PEKAF';
+}
+function isChampionshipFinalQueueRow(x){
+  const b=x?.c?.bracket;
+  // Finals-last only applies when the bracket has a distinct final round.
+  // A one-round category is not enough evidence to classify its first match as a final.
+  if(!b || String(b.mode||'').toLowerCase()==='roundrobin' || !Array.isArray(b.rounds) || b.rounds.length<2) return false;
+  return Number(x.ri)===b.rounds.length-1;
+}
 function orderedReadyMatches(rows){
   const flow=String(matchFlowDraft||data.setup?.matchFlow||'ROUND_CATEGORY').toUpperCase();
-  const ready=(rows||[]).filter(x=>{const st=String(x.m?.status||'READY').toUpperCase();return x.m&&x.m.red&&x.m.blue&&!x.m.completed&&st==='READY';});
-  // Round-by-round flows are a true tournament execution gate, not merely a
-  // display sort. Do not release Round 2 while ANY playable Round 1 match is
-  // still unfinished, even if a later-category match is already READY.
+  const all=(rows||[]).filter(x=>x&&x.m);
+  const ready=all.filter(x=>{
+    const st=String(x.m?.status||'READY').toUpperCase();
+    return x.m&&x.m.red&&x.m.blue&&!x.m.completed&&st==='READY';
+  });
+
+  // DepEd–PEKAF scheduling rule: championship finals are the closing matches.
+  // Determine final status from bracket topology, not category labels or match names.
+  if(isDepEdPekafQueue()){
+    const isFinal=x=>isChampionshipFinalQueueRow(x);
+    const unfinishedNonFinal=all.filter(x=>
+      !x.m.completed && x.m.red && x.m.blue && !isFinal(x)
+    );
+
+    // Finals stay unavailable while any playable non-final remains unfinished.
+    let schedulable=ready;
+    if(unfinishedNonFinal.length){
+      schedulable=ready.filter(x=>!isFinal(x));
+
+      // Keep normal round progression for non-finals; do not release later rounds early.
+      if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){
+        const minRound=Math.min(...unfinishedNonFinal.map(x=>Number(x.ri)||0));
+        schedulable=schedulable.filter(x=>(Number(x.ri)||0)===minRound);
+      }
+      return matchFlowOrderRows(schedulable,flow,x=>x.c);
+    }
+
+    // All non-finals are complete: release eligible finals together, but retain
+    // the user's saved gender/category/round ordering among those finals.
+    return matchFlowOrderRows(ready.filter(isFinal),flow,x=>x.c);
+  }
+
+  // Combative queue: preserve round-by-round progression across categories,
+  // while applying the official category order within each round:
+  // Pinweight, Bantamweight, Featherweight, Extra Lightweight, Half Lightweight.
+  // Championship finals across all combative categories are held until every
+  // playable non-final match is complete, then shown as the closing matches.
+  const rankOf=x=>matchFlowCategoryRank(x?.c||{});
+  const isCombative=x=>rankOf(x)>=0&&rankOf(x)<=4;
+  const unfinished=all.filter(x=>!x.m.completed&&x.m.red&&x.m.blue);
+  const unfinishedCombative=unfinished.filter(isCombative);
+  if(unfinishedCombative.length){
+    const unfinishedNonFinal=unfinishedCombative.filter(x=>!isChampionshipFinalQueueRow(x));
+    if(unfinishedNonFinal.length){
+      let schedulable=ready.filter(x=>isCombative(x)&&!isChampionshipFinalQueueRow(x));
+      const minRound=Math.min(...unfinishedNonFinal.map(x=>Number(x.ri)||0));
+      schedulable=schedulable.filter(x=>(Number(x.ri)||0)===minRound);
+      // Combative rule is always round-by-round, regardless of the general
+      // match-flow preference: within the earliest unfinished round, sort by
+      // official weight class, then category name, then match number.
+      return schedulable.slice().sort((a,b)=>
+        (Number(a.ri)||0)-(Number(b.ri)||0) ||
+        rankOf(a)-rankOf(b) ||
+        String(a.c?.name||'').localeCompare(String(b.c?.name||'')) ||
+        (Number(a.mi)||0)-(Number(b.mi)||0)
+      );
+    }
+    // No unfinished non-final remains: finals are now the closing queue.
+    // Keep finals at the very end and apply weight-category order first.
+    return ready.filter(x=>isCombative(x)&&isChampionshipFinalQueueRow(x)).slice().sort((a,b)=>
+      rankOf(a)-rankOf(b) ||
+      String(a.c?.name||'').localeCompare(String(b.c?.name||'')) ||
+      (Number(a.mi)||0)-(Number(b.mi)||0)
+    );
+  }
+
+  // Non-combative tournaments retain the existing round-by-round behavior.
   if(flow==='ROUND_CATEGORY'||flow==='ROUND_BOYS_FIRST'||flow==='ROUND_GIRLS_FIRST'){
-    const unfinished=(rows||[]).filter(x=>x.m&&!x.m.completed&&x.m.red&&x.m.blue);
     if(!unfinished.length)return [];
     const minRound=Math.min(...unfinished.map(x=>Number(x.ri)||0));
     return matchFlowOrderRows(ready.filter(x=>(Number(x.ri)||0)===minRound),flow,x=>x.c);
@@ -1127,16 +1208,145 @@ function orderedReadyMatches(rows){
   return matchFlowOrderRows(ready,flow,x=>x.c);
 }
 function available(){return orderedReadyMatches(allMatches());}
-async function openScore(cid,ri,mi,court=1){const c=cat(cid),m=c?.bracket?.rounds?.[ri]?.[mi];if(!c||!m||!m.red||!m.blue||m.completed)return;const tid=activeTournamentId();if(!tid)return alert('No active tournament is selected.');let actualCourt=Number(court)||1;let matchFormat=String(m.matchFormat||'')==='single'?'single':(String(m.matchFormat||'')==='best3'?'best3':(Number(data.setup?.combativeRounds)===1?'single':'best3'));try{if(window.RADIUM_DB&&m.id){await window.RADIUM_DB.init();const existing=await window.RADIUM_DB.select('matches',{select:'id,court_id,match_format,status',eq:{id:m.id,tournament_id:tid},limit:1});if(existing.error)throw existing.error;const row=existing.data?.[0];if(row?.match_format)matchFormat=row.match_format;const cr=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,court_number:actualCourt},limit:1});if(cr.error)throw cr.error;if(cr.data?.[0]){actualCourt=Number(cr.data[0].court_number)||actualCourt;const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id,match_format:matchFormat},{id:m.id});if(ur.error)throw ur.error;m.court=actualCourt;m.matchFormat=matchFormat;}}}catch(e){return alert('Could not assign this match to Court '+actualCourt+'. '+(e.message||e))}const q=new URLSearchParams({court:String(actualCourt),tournament:tid,matchId:m.id,categoryId:cid,categoryName:c.name,event:c.event,round:String(ri+1),match:String(mi+1),red:m.red,blue:m.blue,redName:player(m.red)?.name||m.red,blueName:player(m.blue)?.name||m.blue,matchFormat});window.location.href='scoreboard/index.html?'+q.toString()}
-$('nextMatchBtn').onclick=async()=>{const a=available()[0];if(!a)return alert('No ready matches.');const court=await firstAvailableCourt();await openScore(a.c.id,a.ri,a.mi,court)};window.radiumStartQueuedMatch=async function(cid,ri,mi){const court=await firstAvailableCourt();await openScore(cid,ri,mi,court)};$('autoAssignBtn').onclick=async()=>{let i=0;const rows=available();const tid=activeTournamentId();for(const x of rows){const court=(i++%Math.max(1,Number(data.setup.courts)||1))+1;x.m.court=court;if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const cr=await window.RADIUM_DB.select('courts',{select:'id',eq:{tournament_id:tid,court_number:court},limit:1});if(cr.data?.[0]&&x.m.id){const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id},{id:x.m.id});if(ur.error)throw ur.error;}}catch(e){console.error('Court assignment save failed:',e);return alert('Court assignment could not be saved to Supabase. '+(e.message||e))}}}save();await renderQueue();toast('Matches assigned to courts and saved to Supabase')};async function firstAvailableCourt(){const count=Math.max(1,Number(data.setup.courts)||1);const tid=activeTournamentId();if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const courts=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,active:true}});const matches=await window.RADIUM_DB.select('matches',{select:'court_id,status',eq:{tournament_id:tid}});if(!courts.error&&!matches.error){const used=new Set((matches.data||[]).filter(m=>['IN_PROGRESS','READY'].includes(String(m.status||'').toUpperCase())&&m.court_id).map(m=>String(m.court_id)));for(const c of (courts.data||[]).sort((a,b)=>Number(a.court_number)-Number(b.court_number)))if(!used.has(String(c.id)))return Number(c.court_number)||1;}}catch(e){console.warn('Supabase court availability check failed:',e)}}const used=new Set(allMatches().map(x=>Number(x.court)||0));for(let i=1;i<=count;i++)if(!used.has(i))return i;return 1}
+function isTableOfficial(){return !!window.RADIUM_AUTH?.isOfficial?.();}
+async function assignedOfficialCourt(tid=activeTournamentId()){
+  if(!isTableOfficial())return null;
+  const userId=window.RADIUM_AUTH?.user?.id;
+  if(!tid||!userId||!window.RADIUM_DB)return null;
+  await window.RADIUM_DB.init();
+  const assignment=await window.RADIUM_DB.select('staff_court_assignments',{select:'court_id',eq:{tournament_id:tid,user_id:userId,active:true},limit:1});
+  if(assignment.error)throw assignment.error;
+  const courtId=assignment.data?.[0]?.court_id;
+  if(!courtId)return null;
+  const courts=await window.RADIUM_DB.select('courts',{select:'id,court_number,active',eq:{id:courtId,tournament_id:tid},limit:1});
+  if(courts.error)throw courts.error;
+  const court=courts.data?.[0];
+  if(!court||court.active===false)return null;
+  return {id:String(court.id),number:Number(court.court_number)||0};
+}
+async function queueReadyMatchesForOperator(assignedCourt=null){
+  const rows=available();
+  if(!isTableOfficial())return rows;
+  try{
+    const court=assignedCourt||await assignedOfficialCourt();
+    if(!court?.number)return [];
+    return rows.filter(x=>!x.m.court||Number(x.m.court)===court.number);
+  }catch(e){console.error('Assigned court queue could not be loaded:',e);return [];}
+}
+async function openScore(cid,ri,mi,court=1){
+  const c=cat(cid),m=c?.bracket?.rounds?.[ri]?.[mi];
+  if(!c||!m||!m.red||!m.blue||m.completed)return;
+  const tid=activeTournamentId();
+  if(!tid)return alert('No active tournament is selected.');
+  let actualCourt=Number(court)||1;
+  let matchFormat=String(m.matchFormat||'')==='single'?'single':(String(m.matchFormat||'')==='best3'?'best3':(Number(data.setup?.combativeRounds)===1?'single':'best3'));
+  let officialCourt=null;
+  try{
+    if(window.RADIUM_DB&&m.id){
+      await window.RADIUM_DB.init();
+      const existing=await window.RADIUM_DB.select('matches',{select:'id,court_id,match_format,status',eq:{id:m.id,tournament_id:tid},limit:1});
+      if(existing.error)throw existing.error;
+      const row=existing.data?.[0];
+      if(isTableOfficial()){
+        officialCourt=await assignedOfficialCourt(tid);
+        if(!officialCourt?.number) return alert('Your account has no active court assignment. Ask the tournament administrator to assign your court.');
+        actualCourt=officialCourt.number;
+        if(row?.court_id&&String(row.court_id)!==officialCourt.id) return alert('This match is assigned to another court. You can only start matches assigned to Court '+actualCourt+'.');
+        const running=await window.RADIUM_DB.select('matches',{select:'id,status',eq:{tournament_id:tid,court_id:officialCourt.id}});
+        if(running.error)throw running.error;
+        if((running.data||[]).some(x=>['LIVE','IN_PROGRESS'].includes(String(x.status||'').toUpperCase())&&String(x.id)!==String(m.id))) return alert('Court '+actualCourt+' already has a match in progress. Finish that match before starting another.');
+      }
+      if(['LIVE','IN_PROGRESS'].includes(String(row?.status||'').toUpperCase())) return alert('This match is already in progress. Return to its active scoreboard instead of starting it again.');
+      if(row?.match_format)matchFormat=row.match_format;
+      const cr=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,court_number:actualCourt},limit:1});
+      if(cr.error)throw cr.error;
+      if(cr.data?.[0]){
+        if(officialCourt&&String(cr.data[0].id)!==officialCourt.id) return alert('Court assignment validation failed. This match was not started.');
+        actualCourt=Number(cr.data[0].court_number)||actualCourt;
+        const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id,match_format:matchFormat},{id:m.id});
+        if(ur.error)throw ur.error;
+        m.court=actualCourt;m.matchFormat=matchFormat;
+      }else if(isTableOfficial()){
+        return alert('Your assigned court could not be verified. This match was not started.');
+      }
+    }else if(isTableOfficial()){
+      return alert('The tournament match could not be verified online. Reconnect and try again.');
+    }
+  }catch(e){return alert('Could not validate or assign this match to Court '+actualCourt+'. '+(e.message||e));}
+  const q=new URLSearchParams({court:String(actualCourt),tournament:tid,matchId:m.id,categoryId:cid,categoryName:c.name,event:c.event,round:String(ri+1),match:String(mi+1),red:m.red,blue:m.blue,redName:player(m.red)?.name||m.red,blueName:player(m.blue)?.name||m.blue,matchFormat,startSource:'queue'});
+  window.location.href='scoreboard/index.html?'+q.toString();
+}
+$('nextMatchBtn').onclick=async()=>{
+  const rows=await queueReadyMatchesForOperator();
+  const a=rows[0];
+  if(!a)return alert(isTableOfficial()?'No ready matches are assigned to your court. Check your court assignment or ask the manager.':'No ready matches.');
+  const court=await firstAvailableCourt();
+  if(!court)return alert(isTableOfficial()?'Your assigned court is unavailable or already has a match in progress.':'No available court.');
+  await openScore(a.c.id,a.ri,a.mi,court);
+};
+window.radiumStartQueuedMatch=async function(cid,ri,mi){
+  const rows=await queueReadyMatchesForOperator();
+  const target=rows.find(x=>String(x.c.id)===String(cid)&&Number(x.ri)===Number(ri)&&Number(x.mi)===Number(mi));
+  if(!target)return alert('This match is not available in your Match Queue or is assigned to another court.');
+  const court=await firstAvailableCourt();
+  if(!court)return alert(isTableOfficial()?'Your assigned court is unavailable or already has a match in progress.':'No available court.');
+  await openScore(cid,ri,mi,court);
+};
+$('autoAssignBtn').onclick=async()=>{let i=0;const rows=available();const tid=activeTournamentId();for(const x of rows){const court=(i++%Math.max(1,Number(data.setup.courts)||1))+1;x.m.court=court;if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const cr=await window.RADIUM_DB.select('courts',{select:'id',eq:{tournament_id:tid,court_number:court},limit:1});if(cr.data?.[0]&&x.m.id){const ur=await window.RADIUM_DB.update('matches',{court_id:cr.data[0].id},{id:x.m.id});if(ur.error)throw ur.error;}}catch(e){console.error('Court assignment save failed:',e);return alert('Court assignment could not be saved to Supabase. '+(e.message||e))}}}save();await renderQueue();toast('Matches assigned to courts and saved to Supabase')};async function firstAvailableCourt(){
+  const count=Math.max(1,Number(data.setup.courts)||1),tid=activeTournamentId();
+  if(isTableOfficial()){
+    try{
+      const assigned=await assignedOfficialCourt(tid);
+      if(!assigned?.number)return 0;
+      const matches=await window.RADIUM_DB.select('matches',{select:'id,status',eq:{tournament_id:tid,court_id:assigned.id}});
+      if(matches.error)throw matches.error;
+      if((matches.data||[]).some(m=>['LIVE','IN_PROGRESS'].includes(String(m.status||'').toUpperCase())))return 0;
+      return assigned.number;
+    }catch(e){console.warn('Assigned court availability check failed:',e);return 0;}
+  }
+  if(tid&&window.RADIUM_DB){
+    try{
+      await window.RADIUM_DB.init();
+      const courts=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid,active:true}});
+      const matches=await window.RADIUM_DB.select('matches',{select:'court_id,status',eq:{tournament_id:tid}});
+      if(!courts.error&&!matches.error){
+        const used=new Set((matches.data||[]).filter(m=>['LIVE','IN_PROGRESS'].includes(String(m.status||'').toUpperCase())&&m.court_id).map(m=>String(m.court_id)));
+        for(const c of (courts.data||[]).sort((a,b)=>Number(a.court_number)-Number(b.court_number)))if(!used.has(String(c.id)))return Number(c.court_number)||1;
+      }
+    }catch(e){console.warn('Supabase court availability check failed:',e);}
+  }
+  const used=new Set(allMatches().filter(x=>String(x.m?.status||'READY').toUpperCase()==='IN_PROGRESS').map(x=>Number(x.m.court)||0));
+  for(let i=1;i<=count;i++)if(!used.has(i))return i;
+  return 1;
+}
+
 async function renderQueue(){
   const courts=$('courts');
   let liveByCourt=new Map();
   const tid=activeTournamentId();
-  if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const q=await window.RADIUM_DB.select('matches',{select:'id,court_id,category_id,round,match_number,blue_player_id,red_player_id,status,metadata',eq:{tournament_id:tid}});if(!q.error){const cats=new Map(data.categories.map(c=>[String(c.id),c]));const players=new Map(data.players.map(p=>[String(p.id),p]));const courtRows=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid}});const noById=new Map((courtRows.data||[]).map(c=>[String(c.id),Number(c.court_number)]));(q.data||[]).filter(m=>String(m.status||'').toUpperCase()==='IN_PROGRESS'&&m.court_id).forEach(m=>{const cno=noById.get(String(m.court_id));if(!cno)return;const c=cats.get(String(m.category_id));liveByCourt.set(cno,{blueName:players.get(String(m.blue_player_id))?.name||m.blue_player_id,redName:players.get(String(m.red_player_id))?.name||m.red_player_id,categoryName:c?.name||''})});}}catch(e){console.warn('Supabase live court load failed:',e)}}
+  if(tid&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const q=await window.RADIUM_DB.select('matches',{select:'id,court_id,category_id,round,match_number,blue_player_id,red_player_id,status,metadata',eq:{tournament_id:tid}});if(!q.error){const cats=new Map(data.categories.map(c=>[String(c.id),c]));const players=new Map(data.players.map(p=>[String(p.id),p]));const courtRows=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid}});const noById=new Map((courtRows.data||[]).map(c=>[String(c.id),Number(c.court_number)]));(q.data||[]).filter(m=>['LIVE','IN_PROGRESS'].includes(String(m.status||'').toUpperCase())&&m.court_id).forEach(m=>{const cno=noById.get(String(m.court_id));if(!cno)return;const c=cats.get(String(m.category_id));liveByCourt.set(cno,{blueName:players.get(String(m.blue_player_id))?.name||m.blue_player_id,redName:players.get(String(m.red_player_id))?.name||m.red_player_id,categoryName:c?.name||''})});}}catch(e){console.warn('Supabase live court load failed:',e)}}
   courts.innerHTML=Array.from({length:data.setup.courts},(_,i)=>{const cno=i+1,live=liveByCourt.get(cno);return `<div class="court ${live?'live':''}"><h3>COURT ${cno} ${live?'<span class="live-dot">● LIVE</span>':''}</h3>${live?`<div><b>${esc(live.blueName)}</b> vs <b>${esc(live.redName)}</b></div><div class="muted">${esc(live.categoryName)}</div>`:'<div class="muted">AVAILABLE</div>'}</div>`}).join('');
-  const rows=available().slice(0,20);
-  $('upcomingMatches').innerHTML=rows.length?`<div class="queue-match-list">${rows.map((x,i)=>{const red=player(x.m.red)?.name||x.m.red||'TBD',blue=player(x.m.blue)?.name||x.m.blue||'TBD';return `<div class="queue-match ${i===0?'next':''}"><div class="queue-match-num">${i===0?'NEXT':'#'+(i+1)}</div><div class="queue-match-category">${esc(x.c.name)}<small>ROUND ${x.ri+1} • MATCH ${x.mi+1}</small></div><div class="queue-match-players">${esc(red)} <span class="muted">VS</span> ${esc(blue)}</div><button class="btn small primary" onclick="window.radiumStartQueuedMatch('${x.c.id}',${x.ri},${x.mi})">START</button></div>`}).join('')}</div>`:'<div class="empty">No ready matches.</div>';
+  const rows=(await queueReadyMatchesForOperator()).slice(0,20);
+  $('upcomingMatches').innerHTML=rows.length?`<div class="queue-match-list">${rows.map((x,i)=>{const red=player(x.m.red)?.name||x.m.red||'TBD',blue=player(x.m.blue)?.name||x.m.blue||'TBD';return `<div class="queue-match ${i===0?'next':''}"><div class="queue-match-num">${i===0?'NEXT':'#'+(i+1)}</div><div class="queue-match-category">${esc(x.c.name)}<small>ROUND ${x.ri+1} • MATCH ${x.mi+1}</small></div><div class="queue-match-players">${esc(red)} <span class="muted">VS</span> ${esc(blue)}</div><button class="btn small primary" onclick="window.radiumStartQueuedMatch('${x.c.id}',${x.ri},${x.mi})">START</button></div>`}).join('')}</div>`:`<div class="empty">${isTableOfficial()?'No ready matches are assigned to your court. Verify your active court assignment.':'No ready matches.'}</div>`;
+
+  // NEXT MATCH returns here with autoStartNext=1. Wait until the queue has
+  // loaded from the current tournament, then start the next eligible match.
+  const autoParams=new URLSearchParams(location.search);
+  if(autoParams.get('autoStartNext')==='1' && !window.__RADIUM_AUTO_NEXT_STARTED){
+    window.__RADIUM_AUTO_NEXT_STARTED=true;
+    const requestedCourt=Number(autoParams.get('court'))||1;
+    // Remove the one-shot flag so refreshing this page cannot start another match.
+    autoParams.delete('autoStartNext');
+    const cleanQuery=autoParams.toString();
+    try{history.replaceState(null,'',location.pathname+(cleanQuery?'?'+cleanQuery:''));}catch(_){}
+    const nextRows=await queueReadyMatchesForOperator();
+    const next=nextRows.find(x=>!x.m.court||Number(x.m.court)===requestedCourt);
+    if(next){
+      await openScore(next.c.id,next.ri,next.mi,requestedCourt);
+    }else{
+      alert('The completed match was saved, but there is no next ready match for Court '+requestedCourt+'.');
+    }
+  }
 }
 
 function awardMedal(categoryId,playerId,medal){
@@ -1147,14 +1357,33 @@ function awardMedal(categoryId,playerId,medal){
 async function processResultPayload(r){
   if(!r)return false;
   try{
-    // Refresh first so validation and display use the same authoritative Supabase state.
+    // Refresh first so validation uses the latest cloud participants and match state.
     const ok=await window.RADIUM_CLOUD?.pull?.();
     if(ok===false)return false;
-    const c=cat(r.categoryId),m=c?.bracket?.rounds?.[Number(r.round)-1]?.[Number(r.match)-1];
-    if(!c||!m||!r.winner||(m.red!==r.winner&&m.blue!==r.winner))return false;
+    const roundIndex=Number(r.round)-1,matchIndex=Number(r.match)-1;
+    const c=cat(r.categoryId),b=c?.bracket,m=b?.rounds?.[roundIndex]?.[matchIndex];
+    if(!c||!b||!m||!r.winner||(String(m.red)!==String(r.winner)&&String(m.blue)!==String(r.winner)))return false;
+
+    // The scoreboard saves the official result in Supabase, but a cloud refresh
+    // alone does not move the winner inside the saved category bracket. Apply the
+    // advancement here for every category/round, including semifinal -> final.
+    // Reapplying the same result is safe: it writes the same winner into the same slot.
+    m.winner=r.winner;
+    m.completed=true;
+    if(r.blueScore!=null)m.blueScore=Number(r.blueScore)||0;
+    if(r.redScore!=null)m.redScore=Number(r.redScore)||0;
+    if(r.completedAt||r.time)m.completedAt=r.completedAt||r.time;
+    if(r.roundScores)m.roundScores=r.roundScores;
+    if(b.mode!=='roundrobin')advance(b,roundIndex,matchIndex,r.winner);
+    if(Array.isArray(data.results)){
+      const existing=data.results.find(x=>String(x.categoryId)===String(c.id)&&Number(x.round)===Number(r.round)&&Number(x.match)===Number(r.match));
+      const resultRow={...r,categoryId:c.id,category:c.name||r.categoryName||r.category||'',winner:r.winner};
+      if(existing)Object.assign(existing,resultRow);else data.results.push(resultRow);
+    }
+    save();
     renderAll();
     return true;
-  }catch(e){console.error('RADIUM result refresh failed:',e);return false;}
+  }catch(e){console.error('RADIUM result refresh/advancement failed:',e);return false;}
 }
 async function processOneResult(rawKey){const r=window[rawKey];return r?processResultPayload(r):false}
 async function processResult(){return window.__RADIUM_PENDING_RESULT_PROMISE||true}
@@ -1423,34 +1652,5 @@ window.renderAll=renderAll;
 window.RADIUM_MAIN_READY=true;rebuildAnyoMedals();syncCategoryFields();togglePlayerAnyoWeapon();if(data.locked)document.body.classList.add('locked');renderAll();const __initialParams=new URLSearchParams(location.search);const initialView=__initialParams.get('view');
 if(initialView==='bracket')showPage('bracketPage');
 else if(initialView==='anyo')showPage('anyoPage');
-else if(initialView==='queue'){
-  showPage('queuePage');
-  // Coming back from the scoreboard after a single-round match: show what
-  // just happened to the bracket, then jump straight into the next ready
-  // match instead of silently landing on the Match Queue page.
-  if(__initialParams.get('autostart')==='1'){
-    const a=available()[0];
-    if(a){
-      const last=data.results[0];
-      let msg='Loading next match…';
-      if(last){
-        const c=cat(last.categoryId),b=c?.bracket,winnerName=player(last.winner)?.name||last.winner;
-        if(b){
-          msg=(b.champion===last.winner)
-            ?`${winnerName} is the CHAMPION of ${c.name}! Loading next match…`
-            :`${winnerName} advances to ${roundName(Number(last.round)+1,b.rounds.length)} — ${c.name}. Loading next match…`;
-        }
-      }
-      toast(msg);
-      const preferredCourt=Number(__initialParams.get('court'))||0;
-      setTimeout(async()=>{
-        let court=await firstAvailableCourt();
-        if(preferredCourt&&window.RADIUM_DB){try{await window.RADIUM_DB.init();const cr=await window.RADIUM_DB.select('courts',{select:'id',eq:{tournament_id:activeTournamentId(),court_number:preferredCourt},limit:1});const cid=cr.data?.[0]?.id;if(cid){const mr=await window.RADIUM_DB.select('matches',{select:'id,status',eq:{tournament_id:activeTournamentId(),court_id:cid}});const busy=(mr.data||[]).some(m=>['IN_PROGRESS','READY'].includes(String(m.status||'').toUpperCase()));if(!busy)court=preferredCourt;}}catch(e){console.warn('Preferred court check failed:',e)}}
-        await openScore(a.c.id,a.ri,a.mi,court);
-      },1400);
-    }else{
-      toast('No more ready matches in this bracket.');
-    }
-  }
-}
+else if(initialView==='queue'){showPage('queuePage');}
 
