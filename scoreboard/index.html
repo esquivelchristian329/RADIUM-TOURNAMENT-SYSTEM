@@ -674,6 +674,25 @@ function autoAdvantage(){
     }
 }
   
+/* Safe scoreboard toast helper: result saving must not fail because toast UI is unavailable. */
+function toast(message, duration=3200){
+  try{
+    let node=document.getElementById('radiumScoreboardToast');
+    if(!node){
+      node=document.createElement('div');
+      node.id='radiumScoreboardToast';
+      node.setAttribute('role','status');
+      node.setAttribute('aria-live','polite');
+      node.style.cssText='position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:99999;max-width:min(92vw,680px);padding:12px 18px;border-radius:8px;background:#14213d;color:#fff;border:1px solid #6b8ac9;box-shadow:0 6px 24px #0009;font:600 15px Arial,sans-serif;text-align:center;display:none';
+      document.body.appendChild(node);
+    }
+    node.textContent=String(message||'');
+    node.style.display='block';
+    clearTimeout(node._radiumToastTimer);
+    node._radiumToastTimer=setTimeout(()=>{node.style.display='none'},Math.max(1000,Number(duration)||3200));
+  }catch(err){ console.info(String(message||'')); }
+}
+
 /* MATCH CONTEXT + RESULT BRIDGE */
 const scoreQuery=new URLSearchParams(location.search);
 const scoreCourt=scoreQuery.get('court')||'1';
@@ -697,10 +716,15 @@ async function loadTournamentBranding(){
 }
 
 let cloudMatchId=scoreQuery.get('matchId')||'';
+let queueSourceRejected=false;
 async function loadCurrentMatch(){
+  if(scoreQuery.get('startSource')!=='queue'){
+    if(!queueSourceRejected){queueSourceRejected=true;alert('Start Combative matches from Match Queue only. Returning to the queue.');location.replace('../index.html?view=queue');}
+    currentMatch=null;return null;
+  }
   const urlMatch=(scoreQuery.get('categoryId')&&scoreQuery.get('round')!==null&&scoreQuery.get('match')!==null)?{
     categoryId:scoreQuery.get('categoryId'),categoryName:scoreQuery.get('categoryName')||'',event:scoreQuery.get('event')||'',
-    round:Number(scoreQuery.get('round'))||1,match:Number(scoreQuery.get('match'))||1,red:scoreQuery.get('red'),blue:scoreQuery.get('blue'),
+    round:Number(scoreQuery.get('round'))||1,bracketRound:Number(scoreQuery.get('round'))||1,match:Number(scoreQuery.get('match'))||1,red:scoreQuery.get('red'),blue:scoreQuery.get('blue'),
     redName:scoreQuery.get('redName')||scoreQuery.get('red')||'RED',blueName:scoreQuery.get('blueName')||scoreQuery.get('blue')||'BLUE',court:Number(scoreQuery.get('court')||1),matchFormat:scoreQuery.get('matchFormat')||'single',tournament:activeTid(),matchId:cloudMatchId
   }:null;
   currentMatch=urlMatch;
@@ -709,7 +733,7 @@ async function loadCurrentMatch(){
     const blue=currentMatch.blueName||currentMatch.blue||'BLUE',red=currentMatch.redName||currentMatch.red||'RED';
     document.getElementById('blueName').textContent=blue;document.getElementById('redName').textContent=red;
     const info=document.getElementById('matchInfo');if(info)info.textContent=(currentMatch.categoryName||'MATCH')+' • COURT '+(currentMatch.court||scoreCourt);
-    const round=document.getElementById('round');if(round)round.value=Math.max(1,Math.min(3,Number(currentMatch.round)||1));
+    const round=document.getElementById('round');if(round)round.value=1;
     const fmt=document.getElementById('matchFormat');if(fmt)fmt.value=currentMatch.matchFormat==='best3'?'3':'1';
   }
   if(activeTid()&&window.RADIUM_DB){try{const tr=await window.RADIUM_DB.select('tournaments',{select:'name,settings',eq:{id:activeTid()},limit:1});const row=tr.data?.[0]||{};const configured=Number(row.settings?.setup?.duration);roundDurationSeconds=Number.isFinite(configured)&&configured>=30?configured:60;remainingMs=roundDurationSeconds*1000;updateTimer();const timerInput=document.getElementById('timer');if(timerInput)timerInput.value=formatTime(roundDurationSeconds*1000);const title=row.name||'RADIUM TOURNAMENT';const te=document.getElementById('tournamentTitle');if(te)te.textContent=title;const logos=Array.isArray(row.settings?.setup?.scoreboardLogos)?row.settings.setup.scoreboardLogos:[];let permanent=[];try{const lr=await window.RADIUM_DB.select('scoreboard_logos',{select:'slot,storage_path',eq:{tournament_id:activeTid()},limit:20});permanent=lr.data||[];if(window.RADIUM_DB.state?.client)permanent.forEach(x=>{const u=window.RADIUM_DB.state.client.storage.from('radium-scoreboard-logos').getPublicUrl(x.storage_path);if(u?.data?.publicUrl)logos[Number(x.slot)-1]=u.data.publicUrl})}catch(_){};for(let i=0;i<4;i++){const el=document.getElementById('logo'+(i+1));if(el){const src=logos[i]||'';el.src=src;el.style.visibility=src?'visible':'hidden';el.alt=src?'Tournament logo '+(i+1):''}}}catch(e){console.warn('Tournament branding load:',e)}}
@@ -759,34 +783,76 @@ function setAdvanceButton(finished){
 }
 async function nextMatchInBracket(){
   if(!resultSent){alert('Finish and award the current match first.');return}
-  // Give the main tournament window a chance to process the result and finish
-  // the Supabase write before this scoreboard navigates to the next match.
+  const button=document.getElementById('advanceMatchBtn');
+  if(button){button.disabled=true;button.textContent='LOADING NEXT MATCH…'}
   try{
-    if(window.opener && !window.opener.closed){
-      // The result bridge is asynchronous. Explicitly wait for the main
-      // tournament window to consume the result BEFORE flushing Supabase.
-      if(typeof window.opener.processResult==='function') await window.opener.processResult();
-      if(window.opener.RADIUM_CLOUD?.flush) await window.opener.RADIUM_CLOUD.flush();
-    }
-  }catch(e){console.warn('Result processing/cloud flush before next match:',e)}
-  // autostart=1 tells the main app to load the next ready bracket match
-  // straight into the scoreboard, preferring this same court, instead of
-  // stopping on the Match Queue page and waiting for another click.
-  location.href='../index.html?view=queue&autostart=1&court='+encodeURIComponent(scoreCourt);
+    // Ensure the current result is confirmed in the cloud before selecting a
+    // successor. Do not route through the admin/queue page: the operator must
+    // remain in this full-screen scoreboard window.
+    if(resultSaving) throw new Error('The current result is still saving. Please wait a moment and click NEXT MATCH again.');
+    if(!window.RADIUM_DB) throw new Error('The online tournament connection is unavailable.');
+    await window.RADIUM_DB.init();
+    if(!activeTid()) throw new Error('The tournament ID is missing from this scoreboard.');
+    const tid=activeTid();
+    const qr=await window.RADIUM_DB.select('matches',{select:'id,tournament_id,category_id,round,match_number,blue_player_id,red_player_id,status,court_id,match_format,metadata',eq:{tournament_id:tid}});
+    if(qr.error) throw qr.error;
+    const all=qr.data||[];
+    const currentId=String(cloudMatchId||currentMatch?.matchId||'');
+    const currentRow=all.find(x=>String(x.id)===currentId);
+    const courtId=currentRow?.court_id||currentMatch?.courtId||null;
+    const courtNumber=Number(scoreCourt)||Number(currentMatch?.court)||1;
+    const courtRows=await window.RADIUM_DB.select('courts',{select:'id,court_number',eq:{tournament_id:tid}});
+    if(courtRows.error) throw courtRows.error;
+    const courtNumbers=new Map((courtRows.data||[]).map(x=>[String(x.id),Number(x.court_number)||1]));
+    const ready=all.filter(m=>{
+      const status=String(m.status||'READY').toUpperCase();
+      if(String(m.id)===currentId||['COMPLETED','CANCELLED','CANCELED','LIVE','IN_PROGRESS','RUNNING'].includes(status))return false;
+      if(!m.blue_player_id||!m.red_player_id)return false;
+      if(m.court_id&&courtId&&String(m.court_id)!==String(courtId))return false;
+      if(m.court_id&&!courtId&&courtNumbers.get(String(m.court_id))!==courtNumber)return false;
+      return true;
+    }).sort((a,b)=>(Number(a.round)||1)-(Number(b.round)||1)||(Number(a.match_number)||1)-(Number(b.match_number)||1));
+    const next=ready[0];
+    if(!next){if(button){button.disabled=false;button.textContent='NEXT MATCH'};alert('No next ready match is assigned to Court '+courtNumber+'. The scoreboard will remain open.');return}
+    let categories=[],players=[];
+    try{const r=await window.RADIUM_DB.select('categories',{select:'id,name,event',eq:{tournament_id:tid}});if(!r.error)categories=r.data||[]}catch(e){console.warn('Could not load category names:',e)}
+    try{const r=await window.RADIUM_DB.select('players',{select:'id,first_name,middle_name,last_name,nickname,player_number',eq:{tournament_id:tid}});if(!r.error)players=(r.data||[]).map(p=>({...p,display_name:[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' ').replace(/\s+/g,' ').trim()||p.nickname||p.player_number||String(p.id)}))}catch(e){console.warn('Could not load competitor names:',e)}
+    const category=categories.find(x=>String(x.id)===String(next.category_id));
+    const playerName=id=>{const p=players.find(x=>String(x.id)===String(id));return p?.display_name||p?.nickname||p?.player_number||String(id)};
+    const round=Number(next.round)||1, matchNo=Number(next.match_number)||1;
+    const format=next.match_format||next.metadata?.matchFormat||'best3';
+    const params=new URLSearchParams({court:String(courtNumber),tournament:tid,matchId:String(next.id),categoryId:String(next.category_id),categoryName:category?.name||'COMBATIVE MATCH',event:category?.event||'Padded Stick',round:String(round),match:String(matchNo),red:String(next.red_player_id),blue:String(next.blue_player_id),redName:playerName(next.red_player_id),blueName:playerName(next.blue_player_id),matchFormat:format==='single'?'single':'best3',startSource:'queue'});
+    // Re-open this same scoreboard URL in the current tab. This preserves the
+    // operator's fullscreen workflow and initializes the new competitors and
+    // Round 1 controls without visiting the dashboard.
+    location.replace('index.html?'+params.toString());
+  }catch(e){
+    console.error('Direct next-match load failed:',e);
+    if(button){button.disabled=false;button.textContent='NEXT MATCH'}
+    alert('Could not load the next match. The current scoreboard remains open. '+(e?.message||e));
+  }
 }
 function sendMatchResult(winner){
   if(resultSent||resultSaving)return;
   resultSaving=true;
   const m=currentMatch||loadCurrentMatch();
   if(!m||!m.categoryId||m.round==null||m.match==null){resultSaving=false;alert('No tournament match is connected to this scoreboard. Return to the bracket and start the match again.');return}
-  const round=Number(m.round),match=Number(m.match);
-  if(!['BLUE','RED'].includes(winner)||!Number.isInteger(round)||round<1||round>3||!Number.isInteger(match)||match<1||!m.categoryId){resultSaving=false;return alert('Invalid match result. Please reload the scoreboard.');}
-  const state=saveRoundDisplay(round,winner);
+  const bracketRound=Number(m.bracketRound??m.round),match=Number(m.match);
+  const combatRound=Math.max(1,Math.min(3,Number(document.getElementById('round')?.value)||1));
+  if(!['BLUE','RED'].includes(winner)||!Number.isInteger(bracketRound)||bracketRound<1||!Number.isInteger(match)||match<1||!m.categoryId){resultSaving=false;return alert('Invalid match result. Please reload the scoreboard.');}
+  // Do not rewrite the final round's manually recorded winner when the overall
+  // best-of-three winner is determined from the accumulated round decisions.
+  const state=collectRoundState();
   const prior=Array.isArray(window.__RADIUM_ROUND_SCORES)?window.__RADIUM_ROUND_SCORES.slice():[];
-  prior[round-1]={round,blueScore:state.blueScore,redScore:state.redScore,winnerSide:winner,blueFouls:state.blueFouls,redFouls:state.redFouls,blueDisarms:state.blueDisarms,redDisarms:state.redDisarms};
+  const recorded=prior[combatRound-1]||{};
+  const blueScore=Number(recorded.blueScore??state.blueScore)||0;
+  const redScore=Number(recorded.redScore??state.redScore)||0;
+  const bf=Number(recorded.blueFouls??state.blueFouls)||0;
+  const rf=Number(recorded.redFouls??state.redFouls)||0;
+  const bd=Number(recorded.blueDisarms??state.blueDisarms)||0;
+  const rd=Number(recorded.redDisarms??state.redDisarms)||0;
   window.__RADIUM_ROUND_SCORES=prior;
-  const {blueScore,redScore,blueFouls:bf,redFouls:rf,blueDisarms:bd,redDisarms:rd}=state;
-  const payload={time:new Date().toISOString(),completedAt:new Date().toISOString(),court:Number(scoreCourt)||1,categoryId:m.categoryId,categoryName:m.categoryName||'',event:m.event||'',round,match,blue:m.blue,red:m.red,blueName:m.blueName||m.blue,redName:m.redName||m.red,blueScore,redScore,winner:winner==='BLUE'?m.blue:m.red,winnerSide:winner,blueFouls:bf,redFouls:rf,blueDisarms:bd,redDisarms:rd,roundScores:window.__RADIUM_ROUND_SCORES,official:'Scoreboard',matchFormat:(document.getElementById('matchFormat')?.value==='3'?'best3':'single'),correction:!!completedResultEdit};
+  const payload={time:new Date().toISOString(),completedAt:new Date().toISOString(),court:Number(scoreCourt)||1,categoryId:m.categoryId,categoryName:m.categoryName||'',event:m.event||'',round:bracketRound,match,blue:m.blue,red:m.red,blueName:m.blueName||m.blue,redName:m.redName||m.red,blueScore,redScore,winner:winner==='BLUE'?m.blue:m.red,winnerSide:winner,blueFouls:bf,redFouls:rf,blueDisarms:bd,redDisarms:rd,roundScores:window.__RADIUM_ROUND_SCORES,official:'Scoreboard',matchFormat:(document.getElementById('matchFormat')?.value==='3'?'best3':'single'),correction:!!completedResultEdit};
   saveCombatResultCloud(payload).then(()=>{resultSaving=false;try{if(window.opener&&!window.opener.closed)window.opener.postMessage({type:'RADIUM_MATCH_RESULT',payload},'*')}catch(e){} resultSent=true;document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=true);const eb=document.getElementById('editCompletedBtn');if(eb)eb.style.display='inline-block';toast('Result saved and sent to the tournament bracket.');}).catch(e=>{resultSaving=false;console.error('Combat result save failed:',e);document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=false);alert('Result was NOT saved. Please check the connection and try again. '+(e.message||e));});
   document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=true);
 }
@@ -797,48 +863,65 @@ async function officialDecision(side,status){
   if(!confirm(`Confirm ${status} for ${name}?\n\nThe opponent will automatically win and advance.`))return;
   resultSaving=true;document.querySelectorAll('.winner-buttons button,.dq-btn,.noshow-btn').forEach(b=>b.disabled=true);
   const winnerSide=side==='BLUE'?'RED':'BLUE',winner=winnerSide==='BLUE'?m.blue:m.red,loser=side==='BLUE'?m.blue:m.red;
-  const payload={time:new Date().toISOString(),completedAt:new Date().toISOString(),court:Number(scoreCourt)||1,categoryId:m.categoryId,categoryName:m.categoryName||'',event:m.event||'',round:Number(m.round)||1,match:Number(m.match)||1,blue:m.blue,red:m.red,blueName:m.blueName||m.blue,redName:m.redName||m.red,blueScore:Number(document.getElementById('blueScore').value)||0,redScore:Number(document.getElementById('redScore').value)||0,winner,winnerSide,blueFouls:0,redFouls:0,blueDisarms:0,redDisarms:0,roundScores:[],official:'Scoreboard',matchFormat:'single',decisionStatus:status,loser};
+  const payload={time:new Date().toISOString(),completedAt:new Date().toISOString(),court:Number(scoreCourt)||1,categoryId:m.categoryId,categoryName:m.categoryName||'',event:m.event||'',round:Number(m.bracketRound??m.round)||1,match:Number(m.match)||1,blue:m.blue,red:m.red,blueName:m.blueName||m.blue,redName:m.redName||m.red,blueScore:Number(document.getElementById('blueScore').value)||0,redScore:Number(document.getElementById('redScore').value)||0,winner,winnerSide,blueFouls:0,redFouls:0,blueDisarms:0,redDisarms:0,roundScores:[],official:'Scoreboard',matchFormat:'single',decisionStatus:status,loser};
   try{await saveCombatResultCloud(payload);resultSent=true;try{if(window.opener&&!window.opener.closed)window.opener.postMessage({type:'RADIUM_MATCH_RESULT',payload},'*')}catch(e){}toast(`${status} recorded. ${winnerSide} wins and advances.`);}catch(e){resultSaving=false;document.querySelectorAll('.winner-buttons button,.dq-btn,.noshow-btn').forEach(b=>b.disabled=false);console.error(e);alert('The decision was NOT saved. Please check the connection and try again. '+(e.message||e));}
 }
 function awardWinner(winner){
+  // Every round winner is awarded manually. Never infer a winner from scores,
+  // penalties, advantages, disarms, timer expiry, or round totals.
   if(resultSent||resultSaving)return;
-  const round=Number(document.getElementById('round').value)||1;
-  if(round<1||round>3)return;
-  const roundState=saveRoundDisplay(round,winner);
+  if(!['BLUE','RED'].includes(winner))return;
+  const m=currentMatch||loadCurrentMatch();
+  if(!m||!m.categoryId)return alert('No tournament match is connected to this scoreboard.');
+  const round=Math.max(1,Math.min(3,Number(document.getElementById('round')?.value)||1));
+  const bestOfThree=document.getElementById('matchFormat')?.value==='3';
+  const state=saveRoundDisplay(round,winner);
   const prior=Array.isArray(window.__RADIUM_ROUND_SCORES)?window.__RADIUM_ROUND_SCORES.slice():[];
-  prior[round-1]={round,blueScore:roundState.blueScore,redScore:roundState.redScore,winnerSide:winner,blueFouls:roundState.blueFouls,redFouls:roundState.redFouls,blueDisarms:roundState.blueDisarms,redDisarms:roundState.redDisarms};
+  prior[round-1]={round,blueScore:state.blueScore,redScore:state.redScore,winnerSide:winner,blueFouls:state.blueFouls,redFouls:state.redFouls,blueDisarms:state.blueDisarms,redDisarms:state.redDisarms};
   window.__RADIUM_ROUND_SCORES=prior;
-  setWinner(round,winner,true);
+  setWinner(round,winner,false);
 
-  const format=document.getElementById('matchFormat')?.value||'1';
-  // A single-round match ends as soon as the official awards the round.
-  // This is the default for Combatives and prevents the scoreboard from
-  // forcing the competitors into Round 2 or Round 3.
-  if(format==='1'){
-    sendMatchResult(winner);
-    setAdvanceButton(true);
+  // The official manually awards each round. The system automatically detects
+  // the match winner once either athlete has won two rounds in this best-of-three.
+  if(bestOfThree){
+    const wins=window.__RADIUM_ROUND_SCORES.reduce((acc,item)=>{
+      if(item?.winnerSide==='BLUE')acc.blue++;
+      if(item?.winnerSide==='RED')acc.red++;
+      return acc;
+    },{blue:0,red:0});
+    const matchWinner=wins.blue>=2?'BLUE':wins.red>=2?'RED':null;
+    if(matchWinner){
+      toast(`${matchWinner==='BLUE'?(m.blueName||m.blue):(m.redName||m.red)} wins the match (${wins.blue}-${wins.red} rounds). Saving result and advancing the winner.`);
+      sendMatchResult(matchWinner);
+      setAdvanceButton(true);
+      return;
+    }
+    if(round<3){
+      const next=round+1;
+      document.getElementById('round').value=next;
+      resetRoundControls();
+      document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=false);
+      setAdvanceButton(false);
+      toast(`Round ${round} winner recorded. Score: ${wins.blue}-${wins.red}. Ready for Round ${next}.`);
+      return;
+    }
+    // Defensive fallback: a completed three-round match must have a 2-1 result.
+    alert('The round decisions do not produce a valid best-of-three winner. Please review the round winner cards before saving.');
     return;
   }
 
-  // Optional Best-of-3 mode: only continue when the match has not yet been decided.
-  const blueWins=[1,2,3].filter(i=>document.getElementById('winner'+i)?.innerText==='BLUE').length;
-  const redWins=[1,2,3].filter(i=>document.getElementById('winner'+i)?.innerText==='RED').length;
-  const matchFinished=blueWins>=2||redWins>=2||round>=3;
-  if(matchFinished){
-    sendMatchResult(blueWins>=2?'BLUE':redWins>=2?'RED':winner);
-    setAdvanceButton(true);
-  }else{
-    document.getElementById('round').value=round+1;
-    resetRoundControls();
-    setAdvanceButton(false);
-  }
+  // Single-round format: the manually selected winner completes the match.
+  sendMatchResult(winner);
+  setAdvanceButton(true);
 }
+
 function nextRound(){
   if(resultSent){nextMatchInBracket();return}
   const round=Number(document.getElementById('round').value)||1;
-  const blue=parseInt(document.getElementById('blueScore').value)||0,red=parseInt(document.getElementById('redScore').value)||0;
-  if(blue===red){alert('The round is tied. Award the round winner using the ADV/official decision before moving to the next round.');return}
-  awardWinner(blue>red?'BLUE':'RED');
+  if(round>=3){alert('This is the final round. The table official must manually select AWARD BLUE or AWARD RED when the referee declares the winner.');return;}
+  document.getElementById('round').value=round+1;
+  resetRoundControls();
+  setAdvanceButton(false);
 }
 document.getElementById('matchFormat')?.addEventListener('change',async e=>{
   const best3=e.target.value==='3';
@@ -913,38 +996,19 @@ function setWinner(round, winner){
   
 /* CHECK CHAMPION */  
   
-function checkChampion(){  
-  
-    let blueWins = 0;  
-    let redWins = 0;  
-  
-    for(let i = 1; i <= 3; i++){  
-  
-        let result =  
-            document.getElementById("winner" + i).innerText;  
-  
-        if(result === "BLUE"){  
-            blueWins++;  
-        }  
-  
-        else if(result === "RED"){  
-            redWins++;  
-        }  
-    }  
-  
-    document.getElementById("blueChampion").innerText = "";  
-    document.getElementById("redChampion").innerText = "";  
-  
-    if(blueWins >= 2){
-        document.getElementById("blueChampion").innerText = "CHAMPION";
-        sendMatchResult("BLUE");
-    }
-    else if(redWins >= 2){
-        document.getElementById("redChampion").innerText = "CHAMPION";
-        sendMatchResult("RED");
-    }  
-}  
-  
+function checkChampion(){
+  // Round indicators are informational only. They never finalize a match.
+  let blueWins=0,redWins=0;
+  for(let i=1;i<=3;i++){
+    const result=document.getElementById('winner'+i)?.innerText;
+    if(result==='BLUE')blueWins++;
+    else if(result==='RED')redWins++;
+  }
+  const blue=document.getElementById('blueChampion'),red=document.getElementById('redChampion');
+  if(blue)blue.innerText='';
+  if(red)red.innerText='';
+}
+
 /* FULLSCREEN MODE */
 
 function toggleFullscreen(){
@@ -992,48 +1056,10 @@ document.getElementById('timerDisplay')?.addEventListener('click',()=>{
 });
 document.getElementById('timer')?.addEventListener('blur',()=>{manualTimeEdit();document.getElementById('timerWrap')?.classList.remove('editing')});
 
-/* AUTOMATIC ROUND DECISION — fires when the clock hits 00:00.
-   No manual AWARD click needed. Priority: foul disqualification,
-   then higher score, then recorded advantage (ADV) as a tiebreaker. */
+/* Timer expiry never calculates or awards a winner. */
 function autoDecideRoundWinner(){
-    if(resultSent)return;
-    const blueScore=parseInt(document.getElementById("blueScore").value)||0;
-    const redScore=parseInt(document.getElementById("redScore").value)||0;
-    const blueAdv=document.getElementById("blueAdv").checked,redAdv=document.getElementById("redAdv").checked;
-    let blueFouls=0,redFouls=0;
-    if(document.getElementById("bf1").checked)blueFouls++;if(document.getElementById("bf2").checked)blueFouls++;if(document.getElementById("bf3").checked)blueFouls++;
-    if(document.getElementById("rf1").checked)redFouls++;if(document.getElementById("rf2").checked)redFouls++;if(document.getElementById("rf3").checked)redFouls++;
-    let blueDisarms=0,redDisarms=0;
-    if(document.getElementById("bd1").checked)blueDisarms++;if(document.getElementById("bd2").checked)blueDisarms++;
-    if(document.getElementById("rd1").checked)redDisarms++;if(document.getElementById("rd2").checked)redDisarms++;
-
-    let winner=null,reason='';
-    // Disqualification checks take priority over everything else.
-    if(blueFouls>=3){winner='RED';reason='BLUE disqualified — 3 fouls';}
-    else if(redFouls>=3){winner='BLUE';reason='RED disqualified — 3 fouls';}
-    else if(blueDisarms>=2){winner='RED';reason='BLUE disqualified — 2 disarms';}
-    else if(redDisarms>=2){winner='BLUE';reason='RED disqualified — 2 disarms';}
-    // Clear score decides it.
-    else if(blueScore>redScore){winner='BLUE';reason='Higher score';}
-    else if(redScore>blueScore){winner='RED';reason='Higher score';}
-    // Score tied: advantage decides, UNLESS the ADV holder has a foul —
-    // in that case the opponent is awarded the round instead.
-    else if(blueAdv&&!redAdv){
-        if(blueFouls>=1){winner='RED';reason='Score tied — BLUE held advantage but has a foul; RED awarded';}
-        else{winner='BLUE';reason='Score tied — decided by recorded advantage';}
-    }
-    else if(redAdv&&!blueAdv){
-        if(redFouls>=1){winner='BLUE';reason='Score tied — RED held advantage but has a foul; BLUE awarded';}
-        else{winner='RED';reason='Score tied — decided by recorded advantage';}
-    }
-
-    if(winner){
-        awardWinner(winner);
-        const info=document.getElementById('matchInfo');
-        if(info)info.dataset.lastDecision=reason;
-    }else{
-        alert('Time is up and the round is tied with no recorded advantage. Award the round winner manually using AWARD BLUE / AWARD RED.');
-    }
+  if(resultSent)return;
+  toast('Time is up. The referee/table official must manually award the match winner using AWARD BLUE or AWARD RED.');
 }
 async function markMatchStarted(){
     if(!currentMatch?.matchId||!window.RADIUM_DB)return;
@@ -1089,7 +1115,7 @@ function editCompletedResult(){
   document.querySelectorAll('.winner-buttons button').forEach(b=>b.disabled=false);
   const eb=document.getElementById('editCompletedBtn');if(eb)eb.style.display='none';
   setAdvanceButton(false);
-  toast('EDIT MODE: original scores restored. Correct the result and AWARD WINNER to save the correction.');
+  toast('EDIT MODE: original scores restored. The official must manually award the corrected match winner.');
 }
 function resetTimer(){  
   
