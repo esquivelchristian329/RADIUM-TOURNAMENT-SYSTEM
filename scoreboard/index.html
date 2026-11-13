@@ -354,8 +354,10 @@ button{
 
 /* Tournament timer: large main clock + compact milliseconds for LED/monitor readability */
 .timer-wrap{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;flex:1}
-.timer{font-variant-numeric:tabular-nums;letter-spacing:0;white-space:nowrap;line-height:1;font-weight:900;display:flex;align-items:baseline;justify-content:center}
+.timer{font-variant-numeric:tabular-nums;letter-spacing:0;white-space:nowrap;line-height:1;font-weight:900;display:flex;align-items:baseline;justify-content:center;background:#fff;color:#111;padding:clamp(12px,1.25vw,20px) clamp(18px,2vw,30px);min-width:min(82%,340px);border:4px solid #fff;border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,.28);box-sizing:border-box;transition:background-color .18s ease,color .18s ease,border-color .18s ease}
 .timer #timerMs{font-size:.42em;opacity:.9;margin-left:.06em;vertical-align:baseline}
+.timer.timer-expired{background:#e00000;color:#fff;border-color:#ff4545;box-shadow:0 0 0 3px rgba(224,0,0,.22),0 5px 20px rgba(0,0,0,.35)}
+.timer.timer-expired #timerMs{opacity:1}
 .timer-edit{position:absolute;inset:auto 8%;width:84%;height:42px;opacity:0;pointer-events:none;border:1px solid #777;background:#111;color:#fff;text-align:center;font-size:22px;font-weight:900;border-radius:6px}
 .timer-wrap.editing .timer-edit{opacity:1;pointer-events:auto;z-index:3}
 .timer-wrap.editing .timer{opacity:.12}
@@ -1038,6 +1040,12 @@ function updateTimer(){
     const main=document.getElementById('timerMain'),ms=document.getElementById('timerMs'),edit=document.getElementById('timer');
     if(main)main.textContent=parts[0];
     if(ms)ms.textContent='.'+(parts[1]||'000');
+    const timerDisplay=document.getElementById('timerDisplay');
+    if(timerDisplay){
+        const expired=remainingMs<=0;
+        timerDisplay.classList.toggle('timer-expired',expired);
+        timerDisplay.setAttribute('aria-label',expired?'Match time expired':'Match time');
+    }
     if(edit&&!document.getElementById('timerWrap')?.classList.contains('editing'))edit.value=formatted;
 }
 function manualTimeEdit(){
