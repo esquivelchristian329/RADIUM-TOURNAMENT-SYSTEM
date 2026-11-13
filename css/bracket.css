@@ -90,3 +90,31 @@ main{margin-left:260px;padding-top:76px;min-height:100vh}.content{max-width:1450
 #bracketPage .bracket-round-title{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:72px;margin-bottom:22px;padding:10px 12px;background:linear-gradient(135deg,#0d4f98,#062f60);border:1px solid #1d73c8;border-radius:8px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,.25)}
 #bracketPage .bracket-round-title b{font-size:22px;line-height:1;color:#2493ff;letter-spacing:.03em}
 #bracketPage .bracket-round-title span{margin-top:8px;font-size:14px;font-weight:800;color:#fff;letter-spacing:.04em}
+
+/* RADIUM bracket team labels and proportional single-page printing */
+.fighter-identity{display:flex;flex-direction:column;align-items:flex-start;min-width:0;gap:3px;line-height:1.15}
+.fighter-team{display:block;font-size:10px;font-weight:800;line-height:1.2;color:#2b9b72;overflow-wrap:anywhere}
+#bracketPage .fighter-team{color:#75d7a5}
+.fighter-meta{display:block;font-size:9px;line-height:1.15}
+.bye-person{display:flex;flex-direction:column;gap:4px;min-width:0}
+.bye-team,.champion-team{display:block;font-size:10px;font-weight:800;color:#55e89b;line-height:1.2;overflow-wrap:anywhere}
+.champion-team{margin-top:5px;color:#75d7a5}
+@page{size:landscape;margin:0.25in}
+@media print{
+  body.radium-bracket-print .sidebar,body.radium-bracket-print .topbar,
+  body.radium-bracket-print #bracketPage .page-heading,
+  body.radium-bracket-print #bracketPage #matchFlowCard,
+  body.radium-bracket-print #bracketPage #bracketInfo,
+  body.radium-bracket-print #bracketPage .bracket-review-card,
+  body.radium-bracket-print #bracketPage .btn,
+  body.radium-bracket-print #bracketPage select{display:none!important}
+  body.radium-bracket-print main{margin:0!important;padding:0!important;width:100%!important}
+  body.radium-bracket-print .page{display:none!important}
+  body.radium-bracket-print #bracketPage{display:block!important;width:100%!important;margin:0!important;padding:0!important}
+  body.radium-bracket-print #bracketPage .content{width:100%!important;max-width:none!important;margin:0!important;padding:0!important}
+  body.radium-bracket-print #bracketPage .bracket-viewport{display:block!important;position:relative!important;width:var(--radium-bracket-print-width)!important;height:var(--radium-bracket-print-height)!important;min-height:0!important;max-width:none!important;overflow:visible!important;border:0!important;border-radius:0!important;background:#fff!important;box-shadow:none!important;margin:0 auto!important}
+  body.radium-bracket-print #bracketPage .bracket-canvas{position:relative!important;top:0!important;left:0!important;transform:scale(var(--radium-bracket-print-scale))!important;transform-origin:top left!important;gap:64px!important;padding:12px!important;width:max-content!important;min-width:0!important;overflow:visible!important;print-color-adjust:exact;-webkit-print-color-adjust:exact}
+  body.radium-bracket-print #bracketPage .bracket-round{break-inside:avoid;page-break-inside:avoid}
+  body.radium-bracket-print #bracketPage .bracket-match{break-inside:avoid;page-break-inside:avoid}
+  body.radium-bracket-print #bracketPage .bracket-connectors{overflow:visible!important}
+}
