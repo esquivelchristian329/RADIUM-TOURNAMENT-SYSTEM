@@ -25,9 +25,10 @@ body{overflow:auto}.top{position:sticky;top:0;z-index:20;background:rgba(5,13,23
  #printHeader{display:flex!important;align-items:center;gap:4mm;margin-bottom:3mm} #printHeader img{width:15mm;height:15mm;object-fit:contain} #printHeader strong{display:block;font-size:13pt} #printHeader span{display:block;font-size:9pt}
  .brand-logo{width:18mm;height:18mm}.brand{font-size:16pt;color:#111}.sub,.meta{color:#333!important}.status,.controls,.notice{display:none!important}
  .main{padding:0;max-width:none}.bracket-wrap{border:0;box-shadow:none;background:#fff;padding:2mm 0 0;overflow:visible;min-height:0}
- .bracket{display:grid;grid-auto-flow:column;grid-template-columns:repeat(var(--round-count),minmax(0,1fr));grid-auto-columns:auto;gap:3mm;min-width:0;width:100%;padding:0;align-items:start}
- .round{width:auto}.round h3{background:#142c46!important;color:#fff!important;border:1px solid #142c46;padding:2mm 1mm;font-size:7pt;margin-bottom:3mm}
- .matches{min-height:0}.match{width:100%;border:1px solid #444;box-shadow:none;border-radius:2mm;cursor:default}.match-label{font-size:5.5pt;padding:1.2mm 1.5mm}.fighter{min-height:0;padding:1.8mm 1.5mm;border-left-width:3px}.fighter-name{font-size:7pt}.fighter-meta{font-size:5pt}.score{font-size:7pt}.vs{font-size:5pt;padding:.4mm}.state{font-size:5pt;padding:1.2mm 1.5mm}.champion{width:100%;padding:3mm;border:1px solid #333;box-shadow:none}.champion b{font-size:11pt}.tree-lines{display:none}
+ .bracket-wrap{position:relative;width:100%;height:auto;overflow:visible}
+ .bracket{display:grid;grid-auto-flow:column;grid-auto-columns:225px;grid-template-columns:none;gap:64px;min-width:0;width:max-content;padding:8px 18px 36px;align-items:start;transform-origin:top left}
+ .round{width:225px}.round h3{background:#142c46!important;color:#fff!important;border:1px solid #142c46;padding:9px;font-size:12px;margin-bottom:14px}
+ .matches{min-height:120px}.match{width:225px;border:1px solid #444;box-shadow:none;border-radius:8px;cursor:default}.match-label{font-size:9px;padding:6px 8px}.fighter{min-height:40px;padding:9px;border-left-width:5px}.fighter-name{font-size:12px}.fighter-meta{font-size:8px}.score{font-size:13px}.vs{font-size:8px;padding:2px}.state{font-size:8px;padding:6px 9px}.champion{width:225px;padding:18px;border:1px solid #333;box-shadow:none}.champion b{font-size:20px}.tree-lines{display:none}
  .round:nth-child(1) .matches{gap:2.5mm}.round:nth-child(2) .matches{padding-top:8mm;gap:18mm}.round:nth-child(3) .matches{padding-top:24mm;gap:45mm}.round:nth-child(4) .matches{padding-top:55mm;gap:98mm}.round:nth-child(5) .matches{padding-top:120mm}
 }
 .live-flow-note{margin:8px 0 12px;padding:9px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font-size:12px;color:#334155}.flow-next{outline:3px solid #f5b700;outline-offset:2px}.flow-rank{display:inline-block;margin-left:7px;padding:2px 6px;border-radius:999px;background:#071a35;color:#fff;font-size:9px;font-weight:900;letter-spacing:.3px}.flow-waiting{opacity:.72}
@@ -65,7 +66,7 @@ function setNotice(text,kind=''){const n=$('notice');n.className='notice '+kind;
 function playerMap(settings){const m=new Map();(settings?.players||[]).forEach(p=>m.set(String(p.id),p));return m}
 function teamMap(settings){const m=new Map();(settings?.teams||[]).forEach(t=>m.set(String(t.id),t));return m}
 function nameFor(id,pm){if(!id)return 'WAITING';const p=pm.get(String(id));return p?.name||String(id)}
-function metaFor(id,pm,tm){const p=pm.get(String(id));if(!p)return '';const t=p.teamId?tm.get(String(p.teamId))?.name:'';return [t,p.seed?'SEED '+p.seed:''].filter(Boolean).join(' • ')}
+function metaFor(id,pm,tm){const p=pm.get(String(id));if(!p)return '';const team=(p.teamId?tm.get(String(p.teamId))?.name:'')||p.teamName||p.school||p.team||'';return [team,p.seed?'SEED '+p.seed:''].filter(Boolean).join(' • ')}
 function roundName(i,total){const n=total-i;if(n===1)return 'FINAL';if(n===2)return 'SEMIFINAL';if(n===3)return 'QUARTERFINAL';if(n===4)return 'ROUND OF 16';return 'ROUND '+(i+1)}
 function score(m,side){const bye=side==='red'?m.redBye:m.blueBye;if(bye)return '<span class="score">BYE</span>';if(!m.completed)return '';const v=side==='red'?m.redScore:m.blueScore;return '<span class="score">'+esc(v??'—')+'</span>'}
 function matchHtml(m,ri,mi,pm,tm,b,flowRank){
@@ -263,19 +264,21 @@ function normalizedSettings(raw){
 function tournamentSettings(){return normalizedSettings(row?.settings);}
 async function hydrateNormalizedBracket(){
   if(!client||!row?.id)return;
-  const [pr,mr,cr,ca,ct]=await Promise.all([
-    client.from('players').select('id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,status').eq('tournament_id',row.id),
+  const [pr,mr,cr,ca,ct,tr]=await Promise.all([
+    client.from('players').select('id,first_name,middle_name,last_name,gender,age,weight,player_number,team_id,school,status').eq('tournament_id',row.id),
     client.from('matches').select('id,category_id,round,match_number,bracket_position,blue_player_id,red_player_id,blue_score,red_score,winner_player_id,status,metadata,court_id').eq('tournament_id',row.id).order('round').order('match_number'),
     client.from('categories').select('id,tournament_id,name,event_type,gender,age_min,age_max,weight_min,weight_max,division,style,weapon,judges,preset,weight_required,bracket_by,rules,bracket,registration_fee,weight_requirement').eq('tournament_id',row.id),
     client.from('category_court_assignments').select('category_id,court_id,active').eq('tournament_id',row.id).eq('active',true),
-    client.from('courts').select('id,court_number').eq('tournament_id',row.id)
+    client.from('courts').select('id,court_number').eq('tournament_id',row.id),
+    client.from('teams').select('id,name,abbreviation').eq('tournament_id',row.id)
   ]);
-  if(pr.error)throw pr.error;if(mr.error)throw mr.error;if(cr.error)throw cr.error;if(ca.error)throw ca.error;if(ct.error)throw ct.error;
+  if(pr.error)throw pr.error;if(mr.error)throw mr.error;if(cr.error)throw cr.error;if(ca.error)throw ca.error;if(ct.error)throw ct.error;if(tr.error)throw tr.error;
   const settings=tournamentSettings();
   const dbCats=cr.data||[], existingCats=Array.isArray(settings.categories)?settings.categories:[];
   if(!existingCats.length){settings.categories=dbCats.map(c=>({id:c.id,name:c.name,sex:c.gender||'Male',event:c.event_type==='Anyo'?'Arnis Anyo':(c.event_type==='Livestick'?'Livestick':'Padded Stick'),eventNumber:'',judges:Number(c.judges)||5,preset:c.preset||'',anyoType:c.division||'',anyoStyle:c.style||'',anyoWeapon:c.weapon||'Any',ageFrom:Number(c.age_min)||0,ageTo:Number(c.age_max)||99,weightFrom:Number(c.weight_min)||0,weightTo:Number(c.weight_max)||999,weightRequired:!!c.weight_required,bracketBy:c.bracket_by||null,draw:c.rules?.draw||'random',registrationFee:Number(c.registration_fee)||0,weightRequirement:c.weight_requirement||'not_required',bracket:c.bracket||{}}));}
   const courtNumberById=new Map((ct.data||[]).map(x=>[String(x.id),Number(x.court_number)||1]));const assignmentMap=new Map((ca.data||[]).map(x=>[String(x.category_id),courtNumberById.get(String(x.court_id))||1]));
-  settings.players=(pr.data||[]).filter(p=>!p.status||p.status==='active').map(p=>({id:p.id,name:[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' '),sex:p.gender||'',gender:p.gender||'',age:p.age,weight:p.weight,number:p.player_number||'',teamId:p.team_id||null}));
+  settings.teams=(tr.data||[]).map(t=>({id:t.id,name:t.name||t.abbreviation||'Team'}));
+  settings.players=(pr.data||[]).filter(p=>!p.status||p.status==='active').map(p=>({id:p.id,name:[p.first_name,p.middle_name,p.last_name].filter(Boolean).join(' '),sex:p.gender||'',gender:p.gender||'',age:p.age,weight:p.weight,number:p.player_number||'',teamId:p.team_id||null,school:p.school||''}));
   const byCat=new Map();
   for(const m of (mr.data||[])){if(!byCat.has(String(m.category_id)))byCat.set(String(m.category_id),[]);byCat.get(String(m.category_id)).push(m);}
   for(const c of (settings.categories||[])){
@@ -398,14 +401,14 @@ function render(){
   b.rounds.forEach((r,ri)=>{const col=document.createElement('section');col.className='round';col.innerHTML=`<h3>${esc(b.mode==='roundrobin'?'ROUND '+(ri+1):roundName(ri,b.rounds.length))}</h3><div class="matches"></div>`;const list=col.querySelector('.matches');
     if(ri===0&&b.mode==='single'){
       const entries=[];(r||[]).forEach(m=>entries.push({pos:Number.isFinite(m.firstRoundPosition)?m.firstRoundPosition:999,type:'match',m}));(b.byeEntries||[]).forEach(x=>entries.push({pos:x.firstRoundPosition,type:'bye',x}));entries.sort((a,z)=>a.pos-z.pos||({bye:0,match:1}[a.type]-({bye:0,match:1}[z.type])));
-      entries.forEach(e=>{if(e.type==='match'){const mi=r.indexOf(e.m),wrap=document.createElement('div');wrap.innerHTML=matchHtml(e.m,ri,mi,pm,tm,b,readyIds.get(String(e.m.id)));list.appendChild(wrap.firstElementChild)}else{const wrap=document.createElement('div');wrap.className='bye-entry';wrap.dataset.targetMatch=e.x.targetMatchId||'';wrap.innerHTML=`<span class="bye-tag">BYE</span><b>${esc(nameFor(e.x.playerId,pm))}</b><small>ADVANCES</small>`;list.appendChild(wrap)}});
+      entries.forEach(e=>{if(e.type==='match'){const mi=r.indexOf(e.m),wrap=document.createElement('div');wrap.innerHTML=matchHtml(e.m,ri,mi,pm,tm,b,readyIds.get(String(e.m.id)));list.appendChild(wrap.firstElementChild)}else{const wrap=document.createElement('div');wrap.className='bye-entry';wrap.dataset.targetMatch=e.x.targetMatchId||'';wrap.innerHTML=`<span class="bye-tag">BYE</span><div><b>${esc(nameFor(e.x.playerId,pm))}</b>${metaFor(e.x.playerId,pm,tm)?`<small class="fighter-meta">${esc(metaFor(e.x.playerId,pm,tm))}</small>`:''}</div><small>ADVANCES</small>`;list.appendChild(wrap)}});
     }else{
       r.forEach((m,mi)=>{const wrap=document.createElement('div');wrap.innerHTML=matchHtml(m,ri,mi,pm,tm,b,readyIds.get(String(m.id)));list.appendChild(wrap.firstElementChild)});
     }
     if(!list.children.length){const e=document.createElement('div');e.className='empty';e.textContent='No active matches';list.appendChild(e)}
     host.appendChild(col);
   });
-  if(b.champion){const x=document.createElement('div');x.className='champion';x.innerHTML='<small>TOURNAMENT CHAMPION</small><b>🏆 '+esc(nameFor(b.champion,pm))+'</b>';host.appendChild(x)}
+  if(b.champion){const x=document.createElement('div');x.className='champion';const championMeta=metaFor(b.champion,pm,tm);x.innerHTML='<small>TOURNAMENT CHAMPION</small><b>🏆 '+esc(nameFor(b.champion,pm))+'</b>'+(championMeta?'<span class="fighter-meta">'+esc(championMeta)+'</span>':'');host.appendChild(x)}
   host.style.setProperty('--round-count',String(b.rounds.length));
   $('printTournament').textContent=$('tournamentName').textContent||'NEW TOURNAMENT';
   $('printCategory').textContent=c.name||'';
@@ -431,7 +434,19 @@ function startRealtime(){if(!client||channel)return;channel=client.channel('radi
   .on('postgres_changes',{event:'*',schema:'public',table:'matches'},payload=>{if(!row?.id||payload.new?.tournament_id===row.id||payload.old?.tournament_id===row.id)scheduleRealtimeLoad()})
   .on('postgres_changes',{event:'*',schema:'public',table:'categories'},payload=>{if(!row?.id||payload.new?.tournament_id===row.id||payload.old?.tournament_id===row.id)scheduleRealtimeLoad()})
   .subscribe()}
-$('categorySelect').addEventListener('change',()=>{selectedId=$('categorySelect').value;render()});$('refreshBtn').onclick=load;$('printBtn').onclick=()=>{preparePrint();window.print()};
+function fitLiveBracketToOnePrintPage(){
+  const wrap=document.querySelector('.bracket-wrap'),bracket=$('bracket');if(!wrap||!bracket||!bracket.children.length)return;
+  bracket.style.transform='none';wrap.style.height='auto';
+  const width=Math.max(bracket.scrollWidth,bracket.getBoundingClientRect().width),height=Math.max(bracket.scrollHeight,bracket.getBoundingClientRect().height);
+  // A4 landscape with 5mm margins; reserve room for the print heading.
+  const pxPerMm=96/25.4,availableWidth=287*pxPerMm,availableHeight=178*pxPerMm;
+  const scale=Math.min(1,availableWidth/width,availableHeight/height);
+  bracket.style.transformOrigin='top left';bracket.style.transform=`scale(${scale})`;
+  wrap.style.height=(height*scale+8)+'px';wrap.style.width='100%';
+}
+function resetLiveBracketPrintScale(){const wrap=document.querySelector('.bracket-wrap'),bracket=$('bracket');if(bracket)bracket.style.transform='';if(wrap){wrap.style.height='';wrap.style.width='';}}
+window.addEventListener('beforeprint',fitLiveBracketToOnePrintPage);window.addEventListener('afterprint',resetLiveBracketPrintScale);
+$('categorySelect').addEventListener('change',()=>{selectedId=$('categorySelect').value;render()});$('refreshBtn').onclick=load;$('printBtn').onclick=()=>{preparePrint();fitLiveBracketToOnePrintPage();window.print()};
 function preparePrint(){const h=$('printHeader');if(h){h.style.display='flex';h.style.alignItems='center';h.style.gap='4mm';h.style.marginBottom='3mm';h.querySelector('img').style.width='15mm';h.querySelector('img').style.height='15mm';h.querySelector('img').style.objectFit='contain';h.querySelector('strong').style.display='block';h.querySelector('strong').style.fontSize='13pt';h.querySelector('span').style.display='block';h.querySelector('span').style.fontSize='9pt';}setTimeout(()=>{$('printHeader').style.display='none'},1500)}
 window.addEventListener('resize',()=>requestAnimationFrame(drawTree));
 /* V33: Live Bracket is read-only. Scoreboards write authoritative results directly. */
